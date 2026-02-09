@@ -12,12 +12,14 @@ from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFileDialog,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -25,11 +27,20 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
     QPushButton,
+    QSpinBox,
     QSizePolicy,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+from event_detector import EVENT_DEFINITIONS, REQUIRED_TARGET_ROIS
+from event_worker import EventDetectionWorker
 
 MAX_DISPLAY_WIDTH = 1200
 MAX_DISPLAY_HEIGHT = 1200
@@ -416,6 +427,11 @@ class MainWindow(QMainWindow):
         self.current_template_path: Optional[str] = None
         self.shortcuts: list[QShortcut] = []
         self._syncing_roi_list = False
+        self.detect_thread: Optional[QThread] = None
+        self.detect_worker: Optional[EventDetectionWorker] = None
+        self.last_detected_events: list[dict] = []
+        self.last_detection_sample_hz = 10
+        self._last_detection_log_message = ""
 
         self.canvas = VideoCanvas(self)
         self.canvas.roi_drawn.connect(self.on_roi_drawn)
@@ -425,12 +441,26 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._try_autoload_last_template()
         self.update_selected_roi_panel()
+        self._update_event_video_label()
 
     def _build_ui(self) -> None:
         central = QWidget(self)
         self.setCentralWidget(central)
+        root_layout = QVBoxLayout(central)
 
-        main_layout = QHBoxLayout(central)
+        self.main_tabs = QTabWidget(self)
+        root_layout.addWidget(self.main_tabs)
+
+        roi_tab = QWidget(self)
+        self._build_roi_tab(roi_tab)
+        self.main_tabs.addTab(roi_tab, "ROI Secimi")
+
+        event_tab = QWidget(self)
+        self._build_event_tab(event_tab)
+        self.main_tabs.addTab(event_tab, "Olay Tespit")
+
+    def _build_roi_tab(self, container: QWidget) -> None:
+        main_layout = QHBoxLayout(container)
         left_layout = QVBoxLayout()
         right_layout = QVBoxLayout()
 
@@ -449,6 +479,9 @@ class MainWindow(QMainWindow):
         self.load_button.clicked.connect(self.load_template_dialog)
         self.save_button.clicked.connect(self.save_template)
         self.reset_button.clicked.connect(self.reset_rois)
+
+        self.goto_event_tab_button = QPushButton("Olay Tespit'e Gec")
+        self.goto_event_tab_button.clicked.connect(self.switch_to_event_tab)
 
         roi_manager_box = QGroupBox("ROI Manager")
         roi_manager_layout = QVBoxLayout(roi_manager_box)
@@ -470,6 +503,7 @@ class MainWindow(QMainWindow):
         roi_manager_layout.addLayout(roi_buttons_layout)
 
         left_layout.addLayout(controls_layout)
+        left_layout.addWidget(self.goto_event_tab_button)
         left_layout.addWidget(self.canvas, stretch=1)
 
         self.selected_roi_card = RoiCard()
@@ -485,11 +519,243 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(left_layout, stretch=1)
         main_layout.addWidget(right_panel)
 
+    def _build_event_tab(self, container: QWidget) -> None:
+        layout = QVBoxLayout(container)
+
+        self.event_video_label = QLabel("Aktif video: -")
+        layout.addWidget(self.event_video_label)
+
+        controls_layout = QHBoxLayout()
+        self.sample_hz_spin = QSpinBox()
+        self.sample_hz_spin.setRange(5, 12)
+        self.sample_hz_spin.setValue(10)
+        self.sample_hz_spin.setPrefix("sample_hz: ")
+
+        self.detect_button = QPushButton("Olaylari Tespit Et")
+        self.detect_button.clicked.connect(self.start_event_detection)
+
+        self.save_timeline_button = QPushButton("timeline.json Kaydet")
+        self.save_timeline_button.setEnabled(False)
+        self.save_timeline_button.clicked.connect(self.save_timeline_json)
+
+        controls_layout.addWidget(self.sample_hz_spin)
+        controls_layout.addWidget(self.detect_button)
+        controls_layout.addWidget(self.save_timeline_button)
+        controls_layout.addStretch(1)
+        layout.addLayout(controls_layout)
+
+        self.event_progress = QProgressBar()
+        self.event_progress.setRange(0, 100)
+        self.event_progress.setValue(0)
+        layout.addWidget(self.event_progress)
+
+        self.event_log = QPlainTextEdit()
+        self.event_log.setReadOnly(True)
+        self.event_log.setPlaceholderText("Olay tespit loglari burada gorunecek.")
+        self.event_log.setMaximumBlockCount(300)
+        layout.addWidget(self.event_log, stretch=1)
+
+        self.event_table = QTableWidget(len(EVENT_DEFINITIONS), 7)
+        self.event_table.setHorizontalHeaderLabels(
+            ["id", "name", "target_roi", "type", "start", "end", "confidence"]
+        )
+        self.event_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.event_table.verticalHeader().setVisible(False)
+        header = self.event_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.event_table, stretch=1)
+
+        self._reset_event_table()
+
     def _setup_shortcuts(self) -> None:
         for index in range(1, MAX_SHORTCUT_ROIS + 1):
             shortcut = QShortcut(QKeySequence(str(index)), self)
             shortcut.activated.connect(lambda roi_index=index - 1: self.select_roi_by_index(roi_index))
             self.shortcuts.append(shortcut)
+
+    def switch_to_event_tab(self) -> None:
+        self.main_tabs.setCurrentIndex(1)
+
+    def _set_table_item(self, row: int, col: int, value: str) -> None:
+        item = QTableWidgetItem(value)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.event_table.setItem(row, col, item)
+
+    def _reset_event_table(self) -> None:
+        self.event_table.setRowCount(len(EVENT_DEFINITIONS))
+        for row, event_info in enumerate(EVENT_DEFINITIONS):
+            self._set_table_item(row, 0, str(event_info["id"]))
+            self._set_table_item(row, 1, str(event_info["name"]))
+            self._set_table_item(row, 2, str(event_info["target_roi"]))
+            self._set_table_item(row, 3, str(event_info["type"]))
+            self._set_table_item(row, 4, "-")
+            self._set_table_item(row, 5, "-")
+            self._set_table_item(row, 6, "0.00")
+
+    def _update_event_video_label(self) -> None:
+        if self.video_meta is None:
+            self.event_video_label.setText("Aktif video: -")
+            return
+        base_name = os.path.basename(self.video_meta.source_video)
+        self.event_video_label.setText(f"Aktif video: {base_name}")
+
+    def _append_event_log(self, message: str) -> None:
+        cleaned = message.strip()
+        if not cleaned:
+            return
+        self.event_log.appendPlainText(cleaned)
+        self._last_detection_log_message = cleaned
+
+    def _set_detection_controls(self, running: bool) -> None:
+        self.detect_button.setEnabled(not running)
+        self.sample_hz_spin.setEnabled(not running)
+        if running:
+            self.save_timeline_button.setEnabled(False)
+        else:
+            self.save_timeline_button.setEnabled(bool(self.last_detected_events))
+
+    def _invalidate_event_results(self) -> None:
+        self.last_detected_events = []
+        self.save_timeline_button.setEnabled(False)
+        self.event_progress.setValue(0)
+        self._reset_event_table()
+
+    def _rois_to_serializable(self) -> dict:
+        return {name: rect.to_dict() for name, rect in self.rois_rel.items()}
+
+    def start_event_detection(self) -> None:
+        if self.detect_thread is not None and self.detect_thread.isRunning():
+            QMessageBox.information(self, "Olay Tespit", "Analiz zaten calisiyor.")
+            return
+
+        if self.video_meta is None:
+            QMessageBox.warning(self, "Olay Tespit", "Once bir video acin.")
+            return
+        if not os.path.isfile(self.video_meta.source_video):
+            QMessageBox.warning(self, "Olay Tespit", "Aktif video yolu bulunamadi.")
+            return
+
+        missing = [name for name in REQUIRED_TARGET_ROIS if name not in self.rois_rel]
+        if missing:
+            joined = ", ".join(missing)
+            QMessageBox.warning(self, "Olay Tespit", f"Eksik hedef ROI: {joined}")
+            return
+
+        self.main_tabs.setCurrentIndex(1)
+        self.last_detected_events = []
+        self.last_detection_sample_hz = int(self.sample_hz_spin.value())
+        self._last_detection_log_message = ""
+        self._reset_event_table()
+        self.event_log.clear()
+        self.event_progress.setValue(0)
+        self._set_detection_controls(running=True)
+        self._append_event_log("Analiz basladi...")
+
+        self.detect_thread = QThread(self)
+        self.detect_worker = EventDetectionWorker(
+            video_path=self.video_meta.source_video,
+            rois_relative=self._rois_to_serializable(),
+            sample_hz=self.last_detection_sample_hz,
+        )
+        self.detect_worker.moveToThread(self.detect_thread)
+
+        self.detect_thread.started.connect(self.detect_worker.run)
+        self.detect_worker.progress.connect(self.on_event_detection_progress)
+        self.detect_worker.result.connect(self.on_event_detection_result)
+        self.detect_worker.error.connect(self.on_event_detection_error)
+        self.detect_worker.finished.connect(self.on_event_detection_finished)
+        self.detect_worker.finished.connect(self.detect_thread.quit)
+        self.detect_worker.finished.connect(self.detect_worker.deleteLater)
+        self.detect_thread.finished.connect(self.detect_thread.deleteLater)
+        self.detect_thread.finished.connect(self.on_event_detection_thread_finished)
+
+        self.detect_thread.start()
+
+    def on_event_detection_progress(self, percent: int, message: str) -> None:
+        self.event_progress.setValue(max(0, min(100, int(percent))))
+        if message.strip():
+            self._append_event_log(message)
+            self.statusBar().showMessage(message, 2200)
+
+    def on_event_detection_result(self, events: list) -> None:
+        self.last_detected_events = [dict(item) for item in events]
+        for row, event in enumerate(self.last_detected_events):
+            if row >= self.event_table.rowCount():
+                break
+            start_text = "-" if event.get("start") is None else f"{float(event['start']):.2f}"
+            end_text = "-" if event.get("end") is None else f"{float(event['end']):.2f}"
+            confidence_text = f"{float(event.get('confidence', 0.0)):.2f}"
+
+            self._set_table_item(row, 0, str(event.get("id", row + 1)))
+            self._set_table_item(row, 1, str(event.get("name", "")))
+            self._set_table_item(row, 2, str(event.get("target_roi", "")))
+            self._set_table_item(row, 3, str(event.get("type", "")))
+            self._set_table_item(row, 4, start_text)
+            self._set_table_item(row, 5, end_text)
+            self._set_table_item(row, 6, confidence_text)
+
+        self.event_progress.setValue(100)
+        self._append_event_log("Analiz sonucu tabloya yazildi.")
+
+    def on_event_detection_error(self, message: str) -> None:
+        self._append_event_log(f"Hata: {message}")
+        QMessageBox.critical(self, "Olay Tespit", message)
+
+    def on_event_detection_finished(self) -> None:
+        self._set_detection_controls(running=False)
+        if self.last_detected_events:
+            self.statusBar().showMessage("Olay tespiti tamamlandi.", 3000)
+        else:
+            self.statusBar().showMessage("Olay tespiti bitti, sonuc uretilmedi.", 3000)
+
+    def on_event_detection_thread_finished(self) -> None:
+        self.detect_worker = None
+        self.detect_thread = None
+
+    def save_timeline_json(self) -> None:
+        if not self.last_detected_events:
+            QMessageBox.information(self, "timeline.json", "Once olay tespiti calistirin.")
+            return
+        if self.video_meta is None:
+            QMessageBox.warning(self, "timeline.json", "Aktif video bilgisi yok.")
+            return
+
+        initial_dir = os.path.dirname(self.current_template_path) if self.current_template_path else os.getcwd()
+        initial_path = os.path.join(initial_dir, "timeline.json")
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "timeline.json Kaydet",
+            initial_path,
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".json"):
+            save_path += ".json"
+
+        template_value: object
+        if self.current_template_path:
+            template_value = self.current_template_path
+        else:
+            template_value = self._rois_to_serializable()
+
+        payload = {
+            "source_video": self.video_meta.source_video,
+            "template_path": template_value,
+            "sample_hz": int(self.last_detection_sample_hz),
+            "events": self.last_detected_events,
+        }
+
+        try:
+            with open(save_path, "w", encoding="utf-8") as file:
+                json.dump(payload, file, indent=2)
+        except OSError as exc:
+            QMessageBox.critical(self, "timeline.json", f"Kayit basarisiz:\n{exc}")
+            return
+
+        self._append_event_log(f"timeline kaydedildi: {save_path}")
+        self.statusBar().showMessage(f"timeline kaydedildi: {save_path}", 4000)
 
     def _sanitize_roi_name(self, roi_name: str) -> str:
         return roi_name.strip()
@@ -561,6 +827,7 @@ class MainWindow(QMainWindow):
 
         self.roi_order.append(cleaned_name)
         self.set_active_roi_name(cleaned_name)
+        self._invalidate_event_results()
 
     def rename_roi(self) -> None:
         current_name = self.active_roi_name
@@ -591,6 +858,7 @@ class MainWindow(QMainWindow):
             self.canvas.set_rois(self.rois_rel)
 
         self.set_active_roi_name(cleaned_name)
+        self._invalidate_event_results()
 
     def delete_roi(self) -> None:
         current_name = self.active_roi_name
@@ -611,6 +879,7 @@ class MainWindow(QMainWindow):
                 next_active = self.roi_order[-1]
 
         self.set_active_roi_name(next_active, announce=False)
+        self._invalidate_event_results()
         self.statusBar().showMessage(f"Deleted ROI: {current_name}", 2200)
 
     def on_draw_without_selection(self) -> None:
@@ -676,6 +945,8 @@ class MainWindow(QMainWindow):
             self.canvas.set_rois(self.rois_rel)
             self.set_active_roi_name(self.active_roi_name, announce=False)
 
+        self._update_event_video_label()
+        self._invalidate_event_results()
         self.statusBar().showMessage(f"Video loaded: {os.path.basename(path)}", 3000)
 
     def _build_display_rgb(self, frame_bgr: np.ndarray) -> np.ndarray:
@@ -747,6 +1018,7 @@ class MainWindow(QMainWindow):
         self.rois_rel[roi_name] = rect
         self.canvas.set_rois(self.rois_rel)
         self.set_active_roi_name(roi_name, announce=False)
+        self._invalidate_event_results()
 
     def save_template(self) -> None:
         if self.video_meta is None or self.original_bgr is None:
@@ -906,6 +1178,8 @@ class MainWindow(QMainWindow):
         else:
             self.set_active_roi_name(None, announce=False)
 
+        self._invalidate_event_results()
+
     def load_template_from_path(self, template_path: str, silent: bool) -> bool:
         try:
             with open(template_path, "r", encoding="utf-8") as file:
@@ -954,7 +1228,16 @@ class MainWindow(QMainWindow):
         self.pending_template_order = None
         self.canvas.set_rois(self.rois_rel)
         self.set_active_roi_name(None, announce=False)
+        self._invalidate_event_results()
         self.statusBar().showMessage("ROIs reset", 2000)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self.detect_worker is not None:
+            self.detect_worker.cancel()
+        if self.detect_thread is not None and self.detect_thread.isRunning():
+            self.detect_thread.quit()
+            self.detect_thread.wait(1500)
+        super().closeEvent(event)
 
 
 def main() -> None:
