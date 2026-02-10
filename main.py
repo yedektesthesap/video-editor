@@ -208,8 +208,6 @@ class VideoMeta:
 class RoiStats:
     pixel_rect: Tuple[int, int, int, int]
     relative_rect: RelativeRect
-    mean_rgb: Tuple[int, int, int]
-    hex_color: str
     preview_pixmap: QPixmap
 
 
@@ -512,7 +510,6 @@ class RoiCard(QGroupBox):
 
         self.pixel_label = QLabel("Pixel: -")
         self.relative_label = QLabel("Relative: -")
-        self.color_label = QLabel("Mean RGB / HEX: -")
 
         self.preview_label = QLabel("No Preview")
         self.preview_label.setFixedSize(self.PREVIEW_WIDTH, self.PREVIEW_HEIGHT)
@@ -521,7 +518,6 @@ class RoiCard(QGroupBox):
 
         layout.addWidget(self.pixel_label)
         layout.addWidget(self.relative_label)
-        layout.addWidget(self.color_label)
         layout.addWidget(self.preview_label)
 
     def set_roi_name(self, roi_name: Optional[str]) -> None:
@@ -533,15 +529,12 @@ class RoiCard(QGroupBox):
     def set_empty(self, relative_rect: Optional[RelativeRect]) -> None:
         self.pixel_label.setText("Pixel: -")
         self.relative_label.setText(f"Relative: {format_relative_rect(relative_rect)}")
-        self.color_label.setText("Mean RGB / HEX: -")
         self.preview_label.clear()
         self.preview_label.setText("No Preview")
 
     def set_stats(self, stats: RoiStats) -> None:
         self.pixel_label.setText(f"Pixel: {format_pixel_rect(stats.pixel_rect)}")
         self.relative_label.setText(f"Relative: {format_relative_rect(stats.relative_rect)}")
-        r, g, b = stats.mean_rgb
-        self.color_label.setText(f"Mean RGB / HEX: RGB({r}, {g}, {b}) {stats.hex_color}")
 
         scaled = stats.preview_pixmap.scaled(
             self.PREVIEW_WIDTH,
@@ -1252,20 +1245,12 @@ class MainWindow(QMainWindow):
         if crop.size == 0:
             return None
 
-        mean_bgr = crop.mean(axis=(0, 1))
-        blue = int(np.clip(round(float(mean_bgr[0])), 0, 255))
-        green = int(np.clip(round(float(mean_bgr[1])), 0, 255))
-        red = int(np.clip(round(float(mean_bgr[2])), 0, 255))
-        hex_color = f"#{red:02X}{green:02X}{blue:02X}"
-
         preview_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
         preview_pixmap = numpy_rgb_to_qpixmap(preview_rgb)
 
         return RoiStats(
             pixel_rect=pixel_rect,
             relative_rect=rect,
-            mean_rgb=(red, green, blue),
-            hex_color=hex_color,
             preview_pixmap=preview_pixmap,
         )
 
