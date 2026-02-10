@@ -51,6 +51,137 @@ TEMPLATE_VERSION = "1.1"
 SETTINGS_ORGANIZATION = "YSN"
 SETTINGS_APPLICATION = "VideoEditorROI"
 SETTINGS_LAST_TEMPLATE_PATH = "last_template_path"
+EVENT_COL_START = 4
+EVENT_COL_END = 5
+
+DARK_STYLESHEET = """
+QWidget {
+    background-color: #15171c;
+    color: #e5e7eb;
+    selection-background-color: #2f78d4;
+    selection-color: #ffffff;
+}
+
+QMainWindow {
+    background-color: #15171c;
+}
+
+QTabWidget::pane {
+    border: 1px solid #313744;
+    border-radius: 6px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background: #232831;
+    color: #b8c0cc;
+    border: 1px solid #3a414f;
+    border-bottom: none;
+    padding: 8px 14px;
+    margin-right: 2px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+QTabBar::tab:selected {
+    background: #2d3440;
+    color: #ffffff;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #2a303a;
+}
+
+QGroupBox {
+    border: 1px solid #313744;
+    border-radius: 8px;
+    margin-top: 0.8em;
+    padding-top: 0.6em;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+    color: #f4f5f7;
+}
+
+QPushButton {
+    background-color: #2a303a;
+    color: #f4f5f7;
+    border: 1px solid #3d4554;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+QPushButton:hover {
+    background-color: #333b47;
+}
+
+QPushButton:pressed {
+    background-color: #222831;
+}
+
+QPushButton:disabled {
+    background-color: #1f242c;
+    color: #818897;
+    border-color: #2e3440;
+}
+
+QLineEdit,
+QPlainTextEdit,
+QListWidget,
+QTableWidget,
+QSpinBox {
+    background-color: #1b2028;
+    border: 1px solid #313744;
+    border-radius: 5px;
+    padding: 4px;
+}
+
+QHeaderView::section {
+    background-color: #2a303a;
+    color: #edf0f4;
+    border: 1px solid #3d4554;
+    padding: 4px;
+}
+
+QProgressBar {
+    border: 1px solid #3d4554;
+    border-radius: 6px;
+    background: #1b2028;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    background-color: #2f8f4e;
+    border-radius: 5px;
+}
+
+QScrollBar:vertical {
+    background: #15171c;
+    width: 12px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical {
+    background: #3a414f;
+    border-radius: 5px;
+    min-height: 20px;
+}
+
+QScrollBar:horizontal {
+    background: #15171c;
+    height: 12px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #3a414f;
+    border-radius: 5px;
+    min-width: 20px;
+}
+"""
 
 
 @dataclass(frozen=True)
@@ -150,6 +281,21 @@ def format_pixel_rect(rect: Optional[Tuple[int, int, int, int]]) -> str:
         return "-"
     x, y, w, h = rect
     return f"x={x}, y={y}, w={w}, h={h}"
+
+
+def format_time_dk_sn_ms(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "-"
+
+    try:
+        total_ms = int(round(float(seconds) * 1000.0))
+    except (TypeError, ValueError):
+        return "-"
+
+    total_ms = max(0, total_ms)
+    minutes, remainder = divmod(total_ms, 60_000)
+    whole_seconds, millis = divmod(remainder, 1000)
+    return f"{minutes:02d} dk {whole_seconds:02d} sn {millis:03d} ms"
 
 
 def roi_color(roi_name: str) -> QColor:
@@ -544,6 +690,12 @@ class MainWindow(QMainWindow):
         controls_layout.addStretch(1)
         layout.addLayout(controls_layout)
 
+        self.event_frame_preview = QLabel("Start/End hucrelerine tiklayinca frame burada gorunecek.")
+        self.event_frame_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.event_frame_preview.setMinimumHeight(210)
+        self.event_frame_preview.setStyleSheet("border: 1px solid #666; background: #111; color: #aaa;")
+        layout.addWidget(self.event_frame_preview)
+
         self.event_progress = QProgressBar()
         self.event_progress.setRange(0, 100)
         self.event_progress.setValue(0)
@@ -564,6 +716,7 @@ class MainWindow(QMainWindow):
         self.event_table.verticalHeader().setVisible(False)
         header = self.event_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.event_table.cellClicked.connect(self.on_event_table_cell_clicked)
         layout.addWidget(self.event_table, stretch=1)
 
         self._reset_event_table()
@@ -582,6 +735,17 @@ class MainWindow(QMainWindow):
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.event_table.setItem(row, col, item)
 
+    def _set_time_table_item(self, row: int, col: int, seconds: Optional[float]) -> None:
+        item = QTableWidgetItem(format_time_dk_sn_ms(seconds))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        if seconds is None:
+            item.setForeground(QColor("#8d97ab"))
+            item.setToolTip("Bu olay icin zaman bilgisi yok.")
+        else:
+            item.setForeground(QColor("#7ec8ff"))
+            item.setToolTip("Tikla: ilgili frame'i goster.")
+        self.event_table.setItem(row, col, item)
+
     def _reset_event_table(self) -> None:
         self.event_table.setRowCount(len(EVENT_DEFINITIONS))
         for row, event_info in enumerate(EVENT_DEFINITIONS):
@@ -589,9 +753,25 @@ class MainWindow(QMainWindow):
             self._set_table_item(row, 1, str(event_info["name"]))
             self._set_table_item(row, 2, str(event_info["target_roi"]))
             self._set_table_item(row, 3, str(event_info["type"]))
-            self._set_table_item(row, 4, "-")
-            self._set_table_item(row, 5, "-")
+            self._set_time_table_item(row, EVENT_COL_START, None)
+            self._set_time_table_item(row, EVENT_COL_END, None)
             self._set_table_item(row, 6, "0.00")
+
+    def _set_event_frame_preview_pixmap(self, pixmap: Optional[QPixmap]) -> None:
+        if pixmap is None or pixmap.isNull():
+            self.event_frame_preview.clear()
+            self.event_frame_preview.setText("Start/End hucrelerine tiklayinca frame burada gorunecek.")
+            return
+
+        target_width = max(1, self.event_frame_preview.width() - 10)
+        target_height = max(1, self.event_frame_preview.height() - 10)
+        scaled = pixmap.scaled(
+            target_width,
+            target_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.event_frame_preview.setPixmap(scaled)
 
     def _update_event_video_label(self) -> None:
         if self.video_meta is None:
@@ -683,20 +863,120 @@ class MainWindow(QMainWindow):
         for row, event in enumerate(self.last_detected_events):
             if row >= self.event_table.rowCount():
                 break
-            start_text = "-" if event.get("start") is None else f"{float(event['start']):.2f}"
-            end_text = "-" if event.get("end") is None else f"{float(event['end']):.2f}"
+            start_seconds: Optional[float]
+            end_seconds: Optional[float]
+            try:
+                start_seconds = None if event.get("start") is None else float(event.get("start"))
+            except (TypeError, ValueError):
+                start_seconds = None
+            try:
+                end_seconds = None if event.get("end") is None else float(event.get("end"))
+            except (TypeError, ValueError):
+                end_seconds = None
             confidence_text = f"{float(event.get('confidence', 0.0)):.2f}"
 
             self._set_table_item(row, 0, str(event.get("id", row + 1)))
             self._set_table_item(row, 1, str(event.get("name", "")))
             self._set_table_item(row, 2, str(event.get("target_roi", "")))
             self._set_table_item(row, 3, str(event.get("type", "")))
-            self._set_table_item(row, 4, start_text)
-            self._set_table_item(row, 5, end_text)
+            self._set_time_table_item(row, EVENT_COL_START, start_seconds)
+            self._set_time_table_item(row, EVENT_COL_END, end_seconds)
             self._set_table_item(row, 6, confidence_text)
 
         self.event_progress.setValue(100)
         self._append_event_log("Analiz sonucu tabloya yazildi.")
+
+    def on_event_table_cell_clicked(self, row: int, col: int) -> None:
+        if col not in (EVENT_COL_START, EVENT_COL_END):
+            return
+        if row < 0 or row >= len(self.last_detected_events):
+            return
+        if self.video_meta is None:
+            return
+
+        event = self.last_detected_events[row]
+        field_name = "start" if col == EVENT_COL_START else "end"
+        raw_seconds = event.get(field_name)
+        if raw_seconds is None:
+            event_id = event.get("id", row + 1)
+            self.statusBar().showMessage(f"Event {event_id} icin {field_name} zamani yok.", 2500)
+            return
+
+        try:
+            seconds = max(0.0, float(raw_seconds))
+        except (TypeError, ValueError):
+            self.statusBar().showMessage("Zaman bilgisi gecersiz.", 2500)
+            return
+
+        frame_payload = self._read_video_frame_at_seconds(seconds)
+        if frame_payload is None:
+            self.statusBar().showMessage("Frame okunamadi.", 2500)
+            return
+
+        frame_bgr, frame_index = frame_payload
+        self._apply_current_frame(frame_bgr, frame_index)
+
+        event_id = event.get("id", row + 1)
+        pretty_time = format_time_dk_sn_ms(seconds)
+        self.statusBar().showMessage(f"Event {event_id} {field_name}: {pretty_time}", 2800)
+
+    def _read_video_frame_at_seconds(self, seconds: float) -> Optional[Tuple[np.ndarray, int]]:
+        if self.video_meta is None:
+            return None
+
+        video_path = self.video_meta.source_video
+        if not os.path.isfile(video_path):
+            return None
+
+        capture = cv2.VideoCapture(video_path)
+        if not capture.isOpened():
+            return None
+
+        try:
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+            if fps <= 0.0:
+                fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 30.0
+
+            frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            target_frame = int(round(max(0.0, seconds) * fps))
+            if frame_count > 0:
+                target_frame = max(0, min(frame_count - 1, target_frame))
+            else:
+                target_frame = max(0, target_frame)
+
+            capture.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, seconds) * 1000.0)
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    return None
+
+            reported_next = int(capture.get(cv2.CAP_PROP_POS_FRAMES) or (target_frame + 1))
+            actual_frame = max(0, reported_next - 1)
+            return frame, actual_frame
+        finally:
+            capture.release()
+
+    def _apply_current_frame(self, frame_bgr: np.ndarray, frame_index: int) -> None:
+        if self.video_meta is None:
+            return
+
+        self.original_bgr = frame_bgr
+        self.video_meta = VideoMeta(
+            width=self.video_meta.width,
+            height=self.video_meta.height,
+            fps=self.video_meta.fps,
+            frame_index=max(0, int(frame_index)),
+            source_video=self.video_meta.source_video,
+        )
+
+        display_rgb = self._build_display_rgb(frame_bgr)
+        display_pixmap = numpy_rgb_to_qpixmap(display_rgb)
+        self.canvas.set_image_pixmap(display_pixmap)
+        self.canvas.set_rois(self.rois_rel)
+        self._set_event_frame_preview_pixmap(display_pixmap)
+        self.update_selected_roi_panel()
 
     def on_event_detection_error(self, message: str) -> None:
         self._append_event_log(f"Hata: {message}")
@@ -923,7 +1203,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Open Video", "Could not read a frame from this video.")
             return
 
-        self.original_bgr = frame
         self.video_meta = VideoMeta(
             width=width if width > 0 else frame.shape[1],
             height=height if height > 0 else frame.shape[0],
@@ -931,10 +1210,7 @@ class MainWindow(QMainWindow):
             frame_index=frame_index,
             source_video=path,
         )
-
-        display_rgb = self._build_display_rgb(frame)
-        display_pixmap = numpy_rgb_to_qpixmap(display_rgb)
-        self.canvas.set_image_pixmap(display_pixmap)
+        self._apply_current_frame(frame, frame_index)
 
         if self.pending_template_rois is not None:
             pending_order = self.pending_template_order or list(self.pending_template_rois.keys())
@@ -1242,6 +1518,7 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setStyleSheet(DARK_STYLESHEET)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
