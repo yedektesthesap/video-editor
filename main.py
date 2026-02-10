@@ -659,9 +659,24 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(right_panel)
 
     def _build_event_tab(self, container: QWidget) -> None:
-        layout = QVBoxLayout(container)
+        root_layout = QHBoxLayout(container)
 
+        left_panel = QWidget(container)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         self.event_video_label = QLabel("Aktif video: -")
+        self.event_frame_preview = QLabel("Start/End hucrelerine tiklayinca frame burada gorunecek.")
+        self.event_frame_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.event_frame_preview.setMinimumSize(420, 260)
+        self.event_frame_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.event_frame_preview.setStyleSheet("border: 1px solid #666; background: #111; color: #aaa;")
+        left_layout.addWidget(self.event_frame_preview, stretch=1)
+        root_layout.addWidget(left_panel, stretch=3)
+
+        right_panel = QWidget(container)
+        layout = QVBoxLayout(right_panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        right_panel.setMinimumWidth(540)
         layout.addWidget(self.event_video_label)
 
         controls_layout = QHBoxLayout()
@@ -682,12 +697,6 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.save_timeline_button)
         controls_layout.addStretch(1)
         layout.addLayout(controls_layout)
-
-        self.event_frame_preview = QLabel("Start/End hucrelerine tiklayinca frame burada gorunecek.")
-        self.event_frame_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.event_frame_preview.setMinimumHeight(210)
-        self.event_frame_preview.setStyleSheet("border: 1px solid #666; background: #111; color: #aaa;")
-        layout.addWidget(self.event_frame_preview)
 
         self.event_progress = QProgressBar()
         self.event_progress.setRange(0, 100)
@@ -710,7 +719,9 @@ class MainWindow(QMainWindow):
         header = self.event_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.event_table.cellClicked.connect(self.on_event_table_cell_clicked)
-        layout.addWidget(self.event_table, stretch=1)
+        layout.addWidget(self.event_table, stretch=2)
+
+        root_layout.addWidget(right_panel, stretch=2)
 
         self._reset_event_table()
 
