@@ -42,6 +42,11 @@ class DetectorParams:
     color_k: float = 6.0
     motion_min: float = 2.0
     color_min: float = 2.5
+    source_start_first4_enabled: bool = True
+    source_color_k: float = 4.0
+    source_color_min: float = 1.8
+    source_consecutive: int = 2
+    source_soft_ratio: float = 0.8
 
 
 ProgressCallback = Callable[[int, str], None]
@@ -52,7 +57,7 @@ def detect_events(
     video_path: str,
     rois_relative_dict: Mapping[str, Any],
     sample_hz: int = 10,
-    params: Optional[Mapping[str, float]] = None,
+    params: Optional[Mapping[str, Any]] = None,
     progress_cb: Optional[ProgressCallback] = None,
     cancel_cb: Optional[CancelCallback] = None,
 ) -> list[dict]:
@@ -62,6 +67,16 @@ def detect_events(
     if missing_targets:
         joined = ", ".join(missing_targets)
         raise EventDetectionError(f"Eksik hedef ROI: {joined}")
+
+    source_start_first4_enabled = bool(cfg.source_start_first4_enabled)
+    source_start_rois = [str(info.get("source_roi", "")).strip() for info in EVENT_DEFINITIONS[:4]]
+    source_start_rois = [name for name in source_start_rois if name]
+
+    if source_start_first4_enabled:
+        missing_sources = [name for name in source_start_rois if name not in rois_relative_dict]
+        if missing_sources:
+            joined = ", ".join(missing_sources)
+            raise EventDetectionError(f"Eksik kaynak ROI: {joined}")
 
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
@@ -90,6 +105,18 @@ def detect_events(
                 raise EventDetectionError(f"ROI goruntu boyutuna sigmiyor: {target_name}")
             roi_pixels[target_name] = pixel_rect
 
+        if source_start_first4_enabled:
+            for source_name in source_start_rois:
+                if source_name in roi_pixels:
+                    continue
+                rel_rect = _coerce_relative_rect(rois_relative_dict[source_name])
+                if rel_rect is None:
+                    raise EventDetectionError(f"Gecersiz ROI: {source_name}")
+                pixel_rect = _relative_to_pixel_rect(rel_rect, frame_width, frame_height)
+                if pixel_rect is None:
+                    raise EventDetectionError(f"ROI goruntu boyutuna sigmiyor: {source_name}")
+                roi_pixels[source_name] = pixel_rect
+
         timeline = _sample_video_features(
             capture=capture,
             fps=fps,
@@ -107,6 +134,7 @@ def detect_events(
 
     motion_thresholds: dict[str, float] = {}
     color_thresholds: dict[str, float] = {}
+    source_color_thresholds: dict[str, float] = {}
     baseline_count = max(3, int(math.ceil(cfg.baseline_sec * float(cfg.sample_hz))))
     for target_name in REQUIRED_TARGET_ROIS:
         motion_values = timeline["motion"][target_name]
@@ -117,6 +145,13 @@ def detect_events(
         color_thresholds[target_name] = _robust_threshold(
             color_values[:baseline_count], min_limit=cfg.color_min, k=cfg.color_k
         )
+
+    if source_start_first4_enabled:
+        for source_name in source_start_rois:
+            source_values = timeline["color_delta"][source_name]
+            source_color_thresholds[source_name] = _robust_threshold(
+                source_values[:baseline_count], min_limit=cfg.source_color_min, k=cfg.source_color_k
+            )
 
     if progress_cb is not None:
         progress_cb(60, "Olay tespiti basladi")
@@ -133,6 +168,8 @@ def detect_events(
     for event_pos, event_info in enumerate(EVENT_DEFINITIONS):
         _check_cancel(cancel_cb)
         target_roi = str(event_info["target_roi"])
+        source_roi = str(event_info.get("source_roi", "")).strip()
+        event_id = int(event_info["id"])
         event_type = str(event_info["type"])
         motion_series = timeline["motion"][target_roi]
         color_series = timeline["color_delta"][target_roi]
@@ -141,6 +178,7 @@ def detect_events(
         color_threshold = color_thresholds[target_roi]
 
         found_payload: Optional[dict] = None
+        event_search_start = search_start_idx
         idx = search_start_idx
         while idx < sample_count:
             _check_cancel(cancel_cb)
@@ -219,6 +257,20 @@ def detect_events(
                 "end": round(float(timeline["times"][end_idx]), 2),
                 "confidence": round(float(confidence), 2),
             }
+
+            source_start_event = source_start_first4_enabled and event_id <= 4
+            if source_start_event and source_roi in source_color_thresholds:
+                source_series = timeline["color_delta"][source_roi]
+                source_threshold = source_color_thresholds[source_roi]
+                source_start_idx = _find_source_start_index(
+                    color_series=source_series,
+                    search_start_idx=event_search_start,
+                    threshold=source_threshold,
+                    consecutive=cfg.source_consecutive,
+                    soft_ratio=cfg.source_soft_ratio,
+                )
+                if source_start_idx is not None and source_start_idx <= end_idx:
+                    found_payload["start"] = round(float(timeline["times"][source_start_idx]), 2)
 
             search_start_idx = end_idx + 1
             break
@@ -544,7 +596,7 @@ def _clip01(value: float) -> float:
     return float(max(0.0, min(1.0, value)))
 
 
-def _merge_params(sample_hz: int, override: Optional[Mapping[str, float]]) -> DetectorParams:
+def _merge_params(sample_hz: int, override: Optional[Mapping[str, Any]]) -> DetectorParams:
     cfg = DetectorParams(sample_hz=max(5, min(12, int(sample_hz))))
     if override is None:
         return cfg
@@ -561,16 +613,100 @@ def _merge_params(sample_hz: int, override: Optional[Mapping[str, float]]) -> De
         "color_k": cfg.color_k,
         "motion_min": cfg.motion_min,
         "color_min": cfg.color_min,
+        "source_start_first4_enabled": cfg.source_start_first4_enabled,
+        "source_color_k": cfg.source_color_k,
+        "source_color_min": cfg.source_color_min,
+        "source_consecutive": cfg.source_consecutive,
+        "source_soft_ratio": cfg.source_soft_ratio,
     }
-    for key in values:
-        if key == "sample_hz":
-            continue
+    for key in (
+        "baseline_sec",
+        "confirm_sec",
+        "quiet_pour_sec",
+        "quiet_mix_sec",
+        "stable_window_sec",
+        "color_stable_max",
+        "motion_k",
+        "color_k",
+        "motion_min",
+        "color_min",
+        "source_color_k",
+        "source_color_min",
+        "source_soft_ratio",
+    ):
         if key in override:
             try:
                 values[key] = float(override[key])
             except (TypeError, ValueError):
                 continue
+
+    if "source_consecutive" in override:
+        try:
+            values["source_consecutive"] = int(float(override["source_consecutive"]))
+        except (TypeError, ValueError):
+            pass
+
+    if "source_start_first4_enabled" in override:
+        values["source_start_first4_enabled"] = _coerce_bool(
+            override["source_start_first4_enabled"], default=cfg.source_start_first4_enabled
+        )
+
+    values["source_color_k"] = max(0.0, float(values["source_color_k"]))
+    values["source_color_min"] = max(0.0, float(values["source_color_min"]))
+    values["source_consecutive"] = max(1, int(values["source_consecutive"]))
+    values["source_soft_ratio"] = max(0.0, float(values["source_soft_ratio"]))
     return DetectorParams(**values)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _find_source_start_index(
+    color_series: np.ndarray,
+    search_start_idx: int,
+    threshold: float,
+    consecutive: int,
+    soft_ratio: float,
+) -> Optional[int]:
+    if color_series.size <= 0:
+        return None
+
+    start_idx = max(0, min(int(search_start_idx), int(color_series.size) - 1))
+    required = max(1, int(consecutive))
+    hard_threshold = float(threshold)
+
+    streak = 0
+    streak_start = start_idx
+    for idx in range(start_idx, int(color_series.size)):
+        if float(color_series[idx]) > hard_threshold:
+            if streak == 0:
+                streak_start = idx
+            streak += 1
+            if streak >= required:
+                return int(streak_start)
+        else:
+            streak = 0
+
+    soft_threshold = max(0.0, float(soft_ratio)) * hard_threshold
+    for idx in range(start_idx, int(color_series.size)):
+        if float(color_series[idx]) >= soft_threshold:
+            return int(idx)
+
+    tail = color_series[start_idx:]
+    if tail.size <= 0:
+        return None
+    return int(start_idx + int(np.argmax(tail)))
 
 
 def _check_cancel(cancel_cb: Optional[CancelCallback]) -> None:
