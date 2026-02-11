@@ -123,6 +123,7 @@ def detect_events(
 
     events: list[dict] = []
     search_start_idx = 0
+    last_detect_progress = 60
     sample_count = int(timeline["times"].size)
     confirm_window = max(1, int(math.ceil(cfg.confirm_sec * float(cfg.sample_hz))))
     quiet_pour_count = max(1, int(math.ceil(cfg.quiet_pour_sec * float(cfg.sample_hz))))
@@ -143,6 +144,16 @@ def detect_events(
         idx = search_start_idx
         while idx < sample_count:
             _check_cancel(cancel_cb)
+            if progress_cb is not None and sample_count > 0:
+                detect_fraction = (float(event_pos) + (float(idx) / float(max(1, sample_count - 1)))) / float(
+                    len(EVENT_DEFINITIONS)
+                )
+                pct = 60 + int(detect_fraction * 39.0)
+                pct = max(60, min(99, pct))
+                if pct > last_detect_progress:
+                    for smooth_pct in range(last_detect_progress + 1, pct + 1):
+                        progress_cb(smooth_pct, "")
+                    last_detect_progress = pct
             if motion_series[idx] <= motion_threshold:
                 idx += 1
                 continue
@@ -224,11 +235,21 @@ def detect_events(
             }
             if progress_cb is not None:
                 pct = 60 + int(((event_pos + 1) / len(EVENT_DEFINITIONS)) * 40)
-                progress_cb(min(99, pct), f"Event {event_info['id']} bulunamadi")
+                pct = max(last_detect_progress, min(99, pct))
+                if pct > last_detect_progress:
+                    for smooth_pct in range(last_detect_progress + 1, pct + 1):
+                        progress_cb(smooth_pct, "")
+                    last_detect_progress = pct
+                progress_cb(last_detect_progress, f"Event {event_info['id']} bulunamadi")
         else:
             if progress_cb is not None:
                 pct = 60 + int(((event_pos + 1) / len(EVENT_DEFINITIONS)) * 40)
-                progress_cb(min(99, pct), f"Event {event_info['id']} bulundu")
+                pct = max(last_detect_progress, min(99, pct))
+                if pct > last_detect_progress:
+                    for smooth_pct in range(last_detect_progress + 1, pct + 1):
+                        progress_cb(smooth_pct, "")
+                    last_detect_progress = pct
+                progress_cb(last_detect_progress, f"Event {event_info['id']} bulundu")
 
         events.append(found_payload)
 
@@ -236,6 +257,90 @@ def detect_events(
         progress_cb(100, "Olay tespiti tamamlandi")
 
     return events
+
+
+def analyze_roi_color_timeline(
+    video_path: str,
+    roi_name: str,
+    roi_relative: Any,
+    sample_hz: int = 10,
+    progress_cb: Optional[ProgressCallback] = None,
+    cancel_cb: Optional[CancelCallback] = None,
+) -> dict:
+    cfg = _merge_params(sample_hz=sample_hz, override=None)
+    clean_roi_name = str(roi_name).strip()
+    if not clean_roi_name:
+        raise EventDetectionError("ROI adi bos olamaz.")
+
+    capture = cv2.VideoCapture(video_path)
+    if not capture.isOpened():
+        raise EventDetectionError(f"Video acilamadi: {video_path}")
+
+    try:
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        if fps <= 0.0:
+            fps = float(cfg.sample_hz)
+
+        frame_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        frame_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        frame_step = max(1, int(round(fps / float(cfg.sample_hz))))
+
+        if progress_cb is not None:
+            progress_cb(1, f"{clean_roi_name} ROI renk analizi basladi")
+
+        rel_rect = _coerce_relative_rect(roi_relative)
+        if rel_rect is None:
+            raise EventDetectionError(f"Gecersiz ROI: {clean_roi_name}")
+        pixel_rect = _relative_to_pixel_rect(rel_rect, frame_width, frame_height)
+        if pixel_rect is None:
+            raise EventDetectionError(f"ROI goruntu boyutuna sigmiyor: {clean_roi_name}")
+
+        timeline = _sample_video_features(
+            capture=capture,
+            fps=fps,
+            frame_step=frame_step,
+            frame_count=frame_count,
+            roi_pixels={clean_roi_name: pixel_rect},
+            progress_cb=progress_cb,
+            cancel_cb=cancel_cb,
+        )
+    finally:
+        capture.release()
+
+    times = timeline["times"]
+    if times.size == 0:
+        raise EventDetectionError("Videodan ornek frame cikartilamadi.")
+
+    _check_cancel(cancel_cb)
+    color_delta = timeline["color_delta"][clean_roi_name]
+    color_means = timeline["color_mean"][clean_roi_name]
+    if not color_means:
+        raise EventDetectionError("ROI renk serisi cikartilamadi.")
+
+    lab_means = np.asarray(color_means, dtype=np.float64)
+    if lab_means.ndim != 2 or lab_means.shape[1] != 3:
+        raise EventDetectionError("ROI renk serisi gecersiz formatta.")
+
+    if progress_cb is not None:
+        progress_cb(75, "Renk serisi olusturuluyor...")
+
+    mean_rgb = _mean_lab_to_rgb_batch(lab_means, cancel_cb=cancel_cb)
+
+    payload = {
+        "roi_name": clean_roi_name,
+        "times": [float(value) for value in times.tolist()],
+        "delta_lab": [float(value) for value in color_delta.tolist()],
+        "lab_l": [float(value) for value in lab_means[:, 0].tolist()],
+        "lab_a": [float(value) for value in lab_means[:, 1].tolist()],
+        "lab_b": [float(value) for value in lab_means[:, 2].tolist()],
+        "mean_rgb": mean_rgb,
+    }
+
+    if progress_cb is not None:
+        progress_cb(100, "ROI renk analizi tamamlandi")
+
+    return payload
 
 
 def _sample_video_features(
@@ -256,25 +361,24 @@ def _sample_video_features(
     prev_color: dict[str, Optional[np.ndarray]] = {name: None for name in roi_pixels}
 
     current_frame_index = 0
-    last_progress = -1
+    last_progress = 0
     reached_end = False
+    for roi_name, (x, y, w, h) in roi_pixels.items():
+        if w <= 0 or h <= 0:
+            raise EventDetectionError(f"Gecersiz ROI boyutu: {roi_name}")
+
     while not reached_end:
         _check_cancel(cancel_cb)
         ok, frame = capture.read()
         if not ok or frame is None:
             break
 
-        frame_h, frame_w = frame.shape[:2]
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-
         t = float(current_frame_index) / float(fps) if fps > 0.0 else float(len(times))
         times.append(t)
 
         for roi_name, (x, y, w, h) in roi_pixels.items():
-            x1 = min(frame_w, x + w)
-            y1 = min(frame_h, y + h)
-            if x < 0 or y < 0 or x1 <= x or y1 <= y:
+            crop_bgr = frame[y : y + h, x : x + w]
+            if crop_bgr.size == 0:
                 motion[roi_name].append(0.0)
                 color_delta[roi_name].append(0.0)
                 color_mean[roi_name].append(np.zeros((3,), dtype=np.float64))
@@ -282,8 +386,8 @@ def _sample_video_features(
                 prev_color[roi_name] = None
                 continue
 
-            crop_gray = gray[y:y1, x:x1]
-            crop_lab = lab[y:y1, x:x1]
+            crop_gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
+            crop_lab = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2LAB)
             if crop_gray.size == 0 or crop_lab.size == 0:
                 motion[roi_name].append(0.0)
                 color_delta[roi_name].append(0.0)
@@ -292,7 +396,7 @@ def _sample_video_features(
                 prev_color[roi_name] = None
                 continue
 
-            mean_color = crop_lab.reshape(-1, 3).mean(axis=0).astype(np.float64)
+            mean_color = np.array(cv2.mean(crop_lab)[:3], dtype=np.float64)
             previous_gray = prev_gray[roi_name]
             previous_color = prev_color[roi_name]
 
@@ -316,9 +420,10 @@ def _sample_video_features(
         if progress_cb is not None and frame_count > 0:
             pct = int((current_frame_index / float(frame_count)) * 55.0)
             pct = max(1, min(55, pct))
-            if pct != last_progress and pct % 5 == 0:
+            if pct > last_progress:
+                for smooth_pct in range(last_progress + 1, pct + 1):
+                    progress_cb(smooth_pct, "")
                 last_progress = pct
-                progress_cb(pct, "")
 
         # Sample frame'leri disindakiler decode edilmeden atlanir.
         for _ in range(frame_step - 1):
@@ -471,3 +576,28 @@ def _merge_params(sample_hz: int, override: Optional[Mapping[str, float]]) -> De
 def _check_cancel(cancel_cb: Optional[CancelCallback]) -> None:
     if cancel_cb is not None and bool(cancel_cb()):
         raise EventDetectionCancelled("Olay tespiti iptal edildi.")
+
+
+def _mean_lab_to_rgb_batch(
+    lab_means: np.ndarray,
+    cancel_cb: Optional[CancelCallback] = None,
+    chunk_size: int = 4096,
+) -> list[list[int]]:
+    if lab_means.ndim != 2 or lab_means.shape[1] != 3:
+        return []
+
+    total = int(lab_means.shape[0])
+    if total <= 0:
+        return []
+
+    safe_chunk = max(256, int(chunk_size))
+    rgb_rows: list[np.ndarray] = []
+    for start in range(0, total, safe_chunk):
+        _check_cancel(cancel_cb)
+        end = min(total, start + safe_chunk)
+        chunk = np.clip(np.rint(lab_means[start:end]), 0, 255).astype(np.uint8)
+        rgb_chunk = cv2.cvtColor(chunk.reshape(-1, 1, 3), cv2.COLOR_LAB2RGB).reshape(-1, 3)
+        rgb_rows.append(rgb_chunk)
+
+    rgb_data = np.vstack(rgb_rows)
+    return rgb_data.astype(int).tolist()

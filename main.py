@@ -13,10 +13,11 @@ from typing import Dict, Optional, Tuple
 import cv2
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QKeySequence, QPainter, QPen, QPixmap, QShortcut
+from PyQt6.QtGui import QColor, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QFileDialog,
     QGroupBox,
     QHeaderView,
@@ -30,6 +31,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSplitter,
     QSpinBox,
     QSizePolicy,
     QTabWidget,
@@ -40,7 +42,7 @@ from PyQt6.QtWidgets import (
 )
 
 from event_detector import EVENT_DEFINITIONS, REQUIRED_TARGET_ROIS
-from event_worker import EventDetectionWorker
+from event_worker import EventDetectionWorker, RoiColorAnalysisWorker
 
 MAX_DISPLAY_WIDTH = 1200
 MAX_DISPLAY_HEIGHT = 1200
@@ -51,6 +53,7 @@ TEMPLATE_VERSION = "1.1"
 SETTINGS_ORGANIZATION = "YSN"
 SETTINGS_APPLICATION = "VideoEditorROI"
 SETTINGS_LAST_TEMPLATE_PATH = "last_template_path"
+SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
 
@@ -545,6 +548,524 @@ class RoiCard(QGroupBox):
         self.preview_label.setPixmap(scaled)
 
 
+class RoiColorTimelineWidget(QWidget):
+    time_selected = pyqtSignal(float, int)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._roi_name = ""
+        self._times = np.asarray([], dtype=np.float64)
+        self._delta_lab = np.asarray([], dtype=np.float64)
+        self._lab_l = np.asarray([], dtype=np.float64)
+        self._lab_a = np.asarray([], dtype=np.float64)
+        self._lab_b = np.asarray([], dtype=np.float64)
+        self._mean_rgb: list[tuple[int, int, int]] = []
+        self._selected_index: Optional[int] = None
+        self._view_start_index = 0
+        self._view_end_index = 0
+        self._dragging_strip = False
+        self._drag_start_x = 0.0
+        self._drag_start_range: tuple[int, int] = (0, 0)
+        self._drag_moved = False
+
+        self.setMinimumHeight(90)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def clear_data(self) -> None:
+        self._roi_name = ""
+        self._times = np.asarray([], dtype=np.float64)
+        self._delta_lab = np.asarray([], dtype=np.float64)
+        self._lab_l = np.asarray([], dtype=np.float64)
+        self._lab_a = np.asarray([], dtype=np.float64)
+        self._lab_b = np.asarray([], dtype=np.float64)
+        self._mean_rgb = []
+        self._selected_index = None
+        self._view_start_index = 0
+        self._view_end_index = 0
+        self._dragging_strip = False
+        self._drag_start_x = 0.0
+        self._drag_start_range = (0, 0)
+        self._drag_moved = False
+        self.update()
+
+    def set_data(self, payload: dict) -> None:
+        roi_name = str(payload.get("roi_name", "")).strip()
+        times = self._to_float_array(payload.get("times"))
+        mean_rgb = self._to_rgb_series(payload.get("mean_rgb"))
+
+        count = min(times.size, len(mean_rgb))
+        if count <= 0:
+            self.clear_data()
+            return
+
+        self._roi_name = roi_name
+        self._times = times[:count]
+        self._delta_lab = np.asarray([], dtype=np.float64)
+        self._lab_l = np.asarray([], dtype=np.float64)
+        self._lab_a = np.asarray([], dtype=np.float64)
+        self._lab_b = np.asarray([], dtype=np.float64)
+        self._mean_rgb = mean_rgb[:count]
+        self._selected_index = 0
+        self._view_start_index = 0
+        self._view_end_index = count - 1
+        self._dragging_strip = False
+        self._drag_moved = False
+        self.update()
+
+    def set_selected_index(self, index: Optional[int]) -> None:
+        if index is None:
+            self._selected_index = None
+            self.update()
+            return
+        if self._times.size == 0:
+            self._selected_index = None
+            self.update()
+            return
+        bounded = max(0, min(int(index), int(self._times.size) - 1))
+        self._selected_index = bounded
+        self.update()
+
+    def has_data(self) -> bool:
+        return self._times.size > 0
+
+    def zoom_in(self, focus_index: Optional[int] = None) -> bool:
+        start_idx, end_idx = self._visible_range()
+        current = end_idx - start_idx + 1
+        if current <= 1:
+            return False
+        target = max(1, int(round(current * 0.75)))
+        if target >= current:
+            target = current - 1
+        return self._apply_zoom_to_count(target, focus_index)
+
+    def zoom_out(self, focus_index: Optional[int] = None) -> bool:
+        total = int(self._times.size)
+        start_idx, end_idx = self._visible_range()
+        current = end_idx - start_idx + 1
+        if current >= total:
+            return False
+        target = min(total, int(round(current / 0.75)))
+        if target <= current:
+            target = current + 1
+        return self._apply_zoom_to_count(target, focus_index)
+
+    def reset_zoom(self) -> bool:
+        total = int(self._times.size)
+        if total <= 0:
+            return False
+        if self._view_start_index == 0 and self._view_end_index == total - 1:
+            return False
+        self._view_start_index = 0
+        self._view_end_index = total - 1
+        self.update()
+        return True
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._times.size == 0:
+            return
+
+        chart_rects = self._chart_rects()
+        if chart_rects is None:
+            return
+
+        timeline_rect, color_rect = chart_rects
+        point = event.position()
+        if not color_rect.contains(point):
+            return
+
+        index = self._nearest_index_for_x(float(point.x()), timeline_rect)
+        if index is None:
+            return
+
+        self._dragging_strip = True
+        self._drag_start_x = float(point.x())
+        self._drag_start_range = self._visible_range()
+        self._drag_moved = False
+        self._selected_index = index
+        self.update()
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if not self._dragging_strip or self._times.size <= 0:
+            return
+
+        chart_rects = self._chart_rects()
+        if chart_rects is None:
+            return
+
+        timeline_rect, _ = chart_rects
+        start_idx, end_idx = self._drag_start_range
+        visible_count = end_idx - start_idx + 1
+        total = int(self._times.size)
+        if visible_count <= 0:
+            return
+
+        point = event.position()
+        index = self._nearest_index_for_x(float(point.x()), timeline_rect)
+        if index is not None:
+            self._selected_index = index
+
+        if total <= visible_count:
+            self.update()
+            return
+
+        px_width = max(1.0, float(timeline_rect.width()))
+        px_per_sample = px_width / float(max(1, visible_count - 1))
+        shift_samples = int(round((float(point.x()) - self._drag_start_x) / px_per_sample))
+        if shift_samples != 0:
+            max_start = max(0, total - visible_count)
+            new_start = max(0, min(max_start, start_idx - shift_samples))
+            new_end = new_start + visible_count - 1
+            if new_start != self._view_start_index or new_end != self._view_end_index:
+                self._view_start_index = new_start
+                self._view_end_index = new_end
+                self._drag_moved = True
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if not self._dragging_strip:
+            return
+
+        self._dragging_strip = False
+
+        chart_rects = self._chart_rects()
+        if chart_rects is None or self._times.size == 0:
+            return
+
+        timeline_rect, color_rect = chart_rects
+        was_dragged = self._drag_moved
+        self._drag_moved = False
+        point = event.position()
+        if was_dragged:
+            self.update()
+            return
+        if color_rect.contains(point):
+            index = self._nearest_index_for_x(float(point.x()), timeline_rect)
+            if index is not None:
+                self._selected_index = index
+                self.update()
+                self.time_selected.emit(float(self._times[index]), int(index))
+
+    def wheelEvent(self, event) -> None:  # type: ignore[override]
+        if self._times.size <= 1:
+            event.ignore()
+            return
+
+        chart_rects = self._chart_rects()
+        if chart_rects is None:
+            event.ignore()
+            return
+
+        timeline_rect, color_rect = chart_rects
+        point = event.position()
+        if not color_rect.contains(point):
+            event.ignore()
+            return
+
+        focus_index = self._nearest_index_for_x(float(point.x()), timeline_rect)
+        delta = int(event.angleDelta().y())
+        changed = False
+        if delta > 0:
+            changed = self.zoom_in(focus_index)
+        elif delta < 0:
+            changed = self.zoom_out(focus_index)
+
+        if changed:
+            event.accept()
+        else:
+            event.ignore()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        del event
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#15171c"))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if self._times.size == 0:
+            painter.setPen(QColor("#b8c0cc"))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Renk analizi verisi yok.")
+            return
+
+        chart_rects = self._chart_rects()
+        if chart_rects is None:
+            painter.setPen(QColor("#b8c0cc"))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Panel cok kucuk.")
+            return
+
+        timeline_rect, color_rect = chart_rects
+        start_idx, end_idx = self._visible_range()
+        visible_rgb = self._mean_rgb[start_idx : end_idx + 1]
+
+        self._draw_panel_background(painter, color_rect)
+        self._draw_color_strip(painter, color_rect, visible_rgb)
+
+        if self._selected_index is not None and start_idx <= self._selected_index <= end_idx:
+            x_selected = self._x_for_index(timeline_rect, self._selected_index)
+            select_pen = QPen(QColor("#f4f5f7"), 1, Qt.PenStyle.DashLine)
+            painter.setPen(select_pen)
+            painter.drawLine(
+                int(round(x_selected)),
+                int(round(color_rect.top())),
+                int(round(x_selected)),
+                int(round(color_rect.bottom())),
+            )
+
+        painter.setPen(QColor("#d3d9e5"))
+        painter.drawText(
+            QRectF(color_rect.left() + 8, color_rect.top() + 2, color_rect.width() - 16, 16),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "Ortalama Renk (Surukle: kaydir, Tekerlek: zoom)",
+        )
+
+        label = f"ROI: {self._roi_name}" if self._roi_name else "ROI: -"
+        visible_count = end_idx - start_idx + 1
+        zoom_text = f"Gorunum: {visible_count}/{int(self._times.size)}"
+        painter.drawText(
+            QRectF(timeline_rect.left(), color_rect.top() - 20, timeline_rect.width() * 0.65, 18),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            label,
+        )
+        painter.drawText(
+            QRectF(
+                timeline_rect.left() + (timeline_rect.width() * 0.65),
+                color_rect.top() - 20,
+                timeline_rect.width() * 0.35,
+                18,
+            ),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            zoom_text,
+        )
+
+        start_text = f"{float(self._times[start_idx]):.2f}s"
+        end_text = f"{float(self._times[end_idx]):.2f}s"
+        painter.setPen(QColor("#9aa4b7"))
+        painter.drawText(
+            QRectF(timeline_rect.left(), timeline_rect.bottom() + 4, 110, 18),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            start_text,
+        )
+        painter.drawText(
+            QRectF(timeline_rect.right() - 110, timeline_rect.bottom() + 4, 110, 18),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            end_text,
+        )
+
+    @staticmethod
+    def _to_float_array(raw: object) -> np.ndarray:
+        if raw is None:
+            return np.asarray([], dtype=np.float64)
+        try:
+            arr = np.asarray(list(raw), dtype=np.float64)
+        except (TypeError, ValueError):
+            return np.asarray([], dtype=np.float64)
+        if arr.ndim != 1:
+            return np.asarray([], dtype=np.float64)
+        return arr
+
+    @staticmethod
+    def _to_rgb_series(raw: object) -> list[tuple[int, int, int]]:
+        if not isinstance(raw, list):
+            return []
+
+        result: list[tuple[int, int, int]] = []
+        for item in raw:
+            if not isinstance(item, (list, tuple)) or len(item) != 3:
+                continue
+            try:
+                red = max(0, min(255, int(item[0])))
+                green = max(0, min(255, int(item[1])))
+                blue = max(0, min(255, int(item[2])))
+            except (TypeError, ValueError):
+                continue
+            result.append((red, green, blue))
+        return result
+
+    def _chart_rects(self) -> Optional[tuple[QRectF, QRectF]]:
+        outer = QRectF(self.rect()).adjusted(50, 34, -16, -34)
+        if outer.width() < 120 or outer.height() < 28:
+            return None
+
+        color_rect = outer
+        timeline_rect = outer
+        return timeline_rect, color_rect
+
+    def _visible_range(self) -> tuple[int, int]:
+        total = int(self._times.size)
+        if total <= 0:
+            return 0, -1
+        start_idx = max(0, min(int(self._view_start_index), total - 1))
+        end_idx = max(start_idx, min(int(self._view_end_index), total - 1))
+        return start_idx, end_idx
+
+    def _apply_zoom_to_count(self, new_count: int, focus_index: Optional[int]) -> bool:
+        total = int(self._times.size)
+        if total <= 0:
+            return False
+
+        new_count = max(1, min(total, int(new_count)))
+        start_idx, end_idx = self._visible_range()
+        current_count = end_idx - start_idx + 1
+        if current_count == new_count:
+            return False
+
+        if focus_index is None:
+            if self._selected_index is not None:
+                focus_index = self._selected_index
+            else:
+                focus_index = start_idx + (current_count // 2)
+        focus_index = max(0, min(total - 1, int(focus_index)))
+
+        if current_count <= 1:
+            focus_ratio = 0.5
+        else:
+            focus_ratio = (focus_index - start_idx) / float(current_count - 1)
+
+        new_start = int(round(focus_index - focus_ratio * float(max(1, new_count - 1))))
+        max_start = max(0, total - new_count)
+        new_start = max(0, min(max_start, new_start))
+        new_end = new_start + new_count - 1
+
+        self._view_start_index = new_start
+        self._view_end_index = new_end
+        self.update()
+        return True
+
+    def _nearest_index_for_x(self, x_pos: float, timeline_rect: QRectF) -> Optional[int]:
+        if self._times.size == 0:
+            return None
+        start_idx, end_idx = self._visible_range()
+        visible_count = end_idx - start_idx + 1
+        if visible_count <= 1:
+            return start_idx
+
+        left = float(timeline_rect.left())
+        width = max(1.0, float(timeline_rect.width()))
+        clamped_x = max(left, min(float(timeline_rect.right()), x_pos))
+        ratio = (clamped_x - left) / width
+        local_index = int(round(ratio * float(visible_count - 1)))
+        return start_idx + max(0, min(visible_count - 1, local_index))
+
+    @staticmethod
+    def _series_limits(values: np.ndarray) -> tuple[float, float]:
+        if values.size == 0:
+            return 0.0, 1.0
+
+        finite = values[np.isfinite(values)]
+        if finite.size == 0:
+            return 0.0, 1.0
+
+        low = float(np.min(finite))
+        high = float(np.max(finite))
+        if abs(high - low) <= 1e-9:
+            padding = max(1.0, abs(low) * 0.1)
+            return low - padding, high + padding
+
+        padding = (high - low) * 0.1
+        return low - padding, high + padding
+
+    def _x_for_index(self, rect: QRectF, index: int) -> float:
+        start_idx, end_idx = self._visible_range()
+        visible_count = end_idx - start_idx + 1
+        if visible_count <= 1:
+            return float(rect.center().x())
+
+        index = max(start_idx, min(int(index), end_idx))
+        ratio = float(index - start_idx) / float(max(1, visible_count - 1))
+        ratio = max(0.0, min(1.0, ratio))
+        return float(rect.left()) + ratio * float(rect.width())
+
+    @staticmethod
+    def _y_for_value(rect: QRectF, value: float, min_value: float, max_value: float) -> float:
+        span = max(1e-9, max_value - min_value)
+        ratio = (value - min_value) / span
+        ratio = max(0.0, min(1.0, ratio))
+        return float(rect.bottom()) - ratio * float(rect.height())
+
+    @staticmethod
+    def _draw_panel_background(painter: QPainter, rect: QRectF) -> None:
+        painter.fillRect(rect, QColor("#1b2028"))
+        pen = QPen(QColor("#313744"), 1)
+        painter.setPen(pen)
+        painter.drawRect(rect)
+
+    @staticmethod
+    def _draw_guides(painter: QPainter, rect: QRectF) -> None:
+        painter.setPen(QPen(QColor("#2a313c"), 1))
+        for ratio in (0.25, 0.5, 0.75):
+            y_pos = rect.top() + (rect.height() * ratio)
+            painter.drawLine(
+                int(round(rect.left())),
+                int(round(y_pos)),
+                int(round(rect.right())),
+                int(round(y_pos)),
+            )
+
+    def _draw_series(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        values: np.ndarray,
+        start_index: int,
+        end_index: int,
+        min_value: float,
+        max_value: float,
+        color: QColor,
+        width: float,
+    ) -> None:
+        if values.size == 0 or end_index < start_index:
+            return
+
+        pen = QPen(color, width)
+        painter.setPen(pen)
+
+        visible_count = end_index - start_index + 1
+        if visible_count == 1:
+            x_pos = self._x_for_index(rect, start_index)
+            y_pos = self._y_for_value(rect, float(values[start_index]), min_value, max_value)
+            painter.drawEllipse(QRectF(x_pos - 2.5, y_pos - 2.5, 5.0, 5.0))
+            return
+
+        path = QPainterPath()
+        for idx in range(start_index, end_index + 1):
+            value = values[idx]
+            x_pos = self._x_for_index(rect, idx)
+            y_pos = self._y_for_value(rect, float(value), min_value, max_value)
+            if idx == start_index:
+                path.moveTo(x_pos, y_pos)
+            else:
+                path.lineTo(x_pos, y_pos)
+        painter.drawPath(path)
+
+    def _draw_color_strip(self, painter: QPainter, rect: QRectF, visible_rgb: list[tuple[int, int, int]]) -> None:
+        if not visible_rgb:
+            return
+
+        count = len(visible_rgb)
+        if count == 1:
+            red, green, blue = visible_rgb[0]
+            painter.fillRect(rect, QColor(red, green, blue))
+            painter.setPen(QPen(QColor("#313744"), 1))
+            painter.drawRect(rect)
+            return
+
+        left = float(rect.left())
+        width = float(rect.width())
+        top = float(rect.top())
+        height = float(rect.height())
+
+        for idx, (red, green, blue) in enumerate(visible_rgb):
+            x0 = left + (float(idx) / float(count)) * width
+            x1 = left + (float(idx + 1) / float(count)) * width
+            segment = QRectF(x0, top, max(1.0, x1 - x0), height)
+            painter.fillRect(segment, QColor(red, green, blue))
+
+        painter.setPen(QPen(QColor("#313744"), 1))
+        painter.drawRect(rect)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -568,9 +1089,17 @@ class MainWindow(QMainWindow):
         self._syncing_roi_list = False
         self.detect_thread: Optional[QThread] = None
         self.detect_worker: Optional[EventDetectionWorker] = None
+        self.color_thread: Optional[QThread] = None
+        self.color_worker: Optional[RoiColorAnalysisWorker] = None
         self.last_detected_events: list[dict] = []
+        self.last_roi_color_payload: Optional[dict] = None
         self.last_detection_sample_hz = 10
         self._last_detection_log_message = ""
+        self._syncing_color_roi_combo = False
+        self._event_detection_busy = False
+        self._color_analysis_busy = False
+        self._event_detection_cancel_requested = False
+        self._color_analysis_cancel_requested = False
 
         self.canvas = VideoCanvas(self)
         self.canvas.roi_drawn.connect(self.on_roi_drawn)
@@ -659,7 +1188,8 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(right_panel)
 
     def _build_event_tab(self, container: QWidget) -> None:
-        root_layout = QHBoxLayout(container)
+        root_layout = QVBoxLayout(container)
+        root_layout.setContentsMargins(0, 0, 0, 0)
 
         left_panel = QWidget(container)
         left_layout = QVBoxLayout(left_panel)
@@ -667,16 +1197,15 @@ class MainWindow(QMainWindow):
         self.event_video_label = QLabel("Aktif video: -")
         self.event_frame_preview = QLabel("Start/End hucrelerine tiklayinca frame burada gorunecek.")
         self.event_frame_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.event_frame_preview.setMinimumSize(420, 260)
+        self.event_frame_preview.setMinimumSize(280, 220)
         self.event_frame_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.event_frame_preview.setStyleSheet("border: 1px solid #666; background: #111; color: #aaa;")
         left_layout.addWidget(self.event_frame_preview, stretch=1)
-        root_layout.addWidget(left_panel, stretch=3)
 
         right_panel = QWidget(container)
         layout = QVBoxLayout(right_panel)
         layout.setContentsMargins(0, 0, 0, 0)
-        right_panel.setMinimumWidth(540)
+        right_panel.setMinimumWidth(460)
         layout.addWidget(self.event_video_label)
 
         controls_layout = QHBoxLayout()
@@ -686,28 +1215,41 @@ class MainWindow(QMainWindow):
         self.sample_hz_spin.setPrefix("sample_hz: ")
 
         self.detect_button = QPushButton("Olaylari Tespit Et")
-        self.detect_button.clicked.connect(self.start_event_detection)
+        self.detect_button.clicked.connect(self.on_detect_button_clicked)
 
         self.save_timeline_button = QPushButton("timeline.json Kaydet")
         self.save_timeline_button.setEnabled(False)
         self.save_timeline_button.clicked.connect(self.save_timeline_json)
 
+        self.color_roi_label = QLabel("Renk ROI:")
+        self.color_roi_combo = QComboBox()
+        self.color_roi_combo.currentTextChanged.connect(self.on_color_roi_changed)
+        self.color_analyze_button = QPushButton("ROI Renk Analizi")
+        self.color_analyze_button.clicked.connect(self.on_color_analyze_button_clicked)
+
         controls_layout.addWidget(self.sample_hz_spin)
         controls_layout.addWidget(self.detect_button)
         controls_layout.addWidget(self.save_timeline_button)
         controls_layout.addStretch(1)
-        layout.addLayout(controls_layout)
 
         self.event_progress = QProgressBar()
         self.event_progress.setRange(0, 100)
         self.event_progress.setValue(0)
-        layout.addWidget(self.event_progress)
 
         self.event_log = QPlainTextEdit()
         self.event_log.setReadOnly(True)
         self.event_log.setPlaceholderText("Olay tespit loglari burada gorunecek.")
         self.event_log.setMaximumBlockCount(300)
-        layout.addWidget(self.event_log, stretch=1)
+        self.event_log.setMinimumWidth(320)
+        self.event_log.setMaximumHeight(110)
+
+        top_row_layout = QHBoxLayout()
+        top_left_layout = QVBoxLayout()
+        top_left_layout.setContentsMargins(0, 0, 0, 0)
+        top_left_layout.addLayout(controls_layout)
+        top_left_layout.addWidget(self.event_progress)
+        top_row_layout.addLayout(top_left_layout, stretch=3)
+        top_row_layout.addWidget(self.event_log, stretch=2)
 
         self.event_table = QTableWidget(len(EVENT_DEFINITIONS), 7)
         self.event_table.setHorizontalHeaderLabels(
@@ -719,11 +1261,57 @@ class MainWindow(QMainWindow):
         header = self.event_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.event_table.cellClicked.connect(self.on_event_table_cell_clicked)
-        layout.addWidget(self.event_table, stretch=2)
 
-        root_layout.addWidget(right_panel, stretch=2)
+        color_controls_layout = QHBoxLayout()
+        color_controls_layout.addWidget(self.color_roi_label)
+        color_controls_layout.addWidget(self.color_roi_combo)
+        color_controls_layout.addWidget(self.color_analyze_button)
+        color_controls_layout.addStretch(1)
+
+        self.color_progress = QProgressBar()
+        self.color_progress.setRange(0, 100)
+        self.color_progress.setValue(0)
+
+        self.roi_color_timeline = RoiColorTimelineWidget(self)
+        self.roi_color_timeline.time_selected.connect(self.on_roi_color_time_selected)
+
+        upper_section = QWidget(right_panel)
+        upper_layout = QVBoxLayout(upper_section)
+        upper_layout.setContentsMargins(0, 0, 0, 0)
+        upper_layout.addLayout(top_row_layout)
+        upper_layout.addWidget(self.event_table, stretch=1)
+
+        lower_section = QWidget(right_panel)
+        lower_layout = QVBoxLayout(lower_section)
+        lower_layout.setContentsMargins(0, 0, 0, 0)
+        lower_layout.addLayout(color_controls_layout)
+        lower_layout.addWidget(self.color_progress)
+        lower_layout.addWidget(self.roi_color_timeline, stretch=1)
+
+        self.event_vertical_splitter = QSplitter(Qt.Orientation.Vertical, right_panel)
+        self.event_vertical_splitter.setChildrenCollapsible(False)
+        self.event_vertical_splitter.setHandleWidth(8)
+        self.event_vertical_splitter.addWidget(upper_section)
+        self.event_vertical_splitter.addWidget(lower_section)
+        self.event_vertical_splitter.setStretchFactor(0, 3)
+        self.event_vertical_splitter.setStretchFactor(1, 2)
+        self.event_vertical_splitter.setSizes([420, 320])
+        layout.addWidget(self.event_vertical_splitter, stretch=1)
+
+        self.event_splitter = QSplitter(Qt.Orientation.Horizontal, container)
+        self.event_splitter.setChildrenCollapsible(False)
+        self.event_splitter.setHandleWidth(8)
+        self.event_splitter.addWidget(left_panel)
+        self.event_splitter.addWidget(right_panel)
+        self.event_splitter.setStretchFactor(0, 0)
+        self.event_splitter.setStretchFactor(1, 1)
+        left_initial = max(220, self.event_frame_preview.minimumWidth())
+        self.event_splitter.setSizes([left_initial, 1800])
+        root_layout.addWidget(self.event_splitter)
 
         self._reset_event_table()
+        self._refresh_color_roi_combo()
+        self._update_analysis_controls()
 
     def _setup_shortcuts(self) -> None:
         for index in range(1, MAX_SHORTCUT_ROIS + 1):
@@ -791,26 +1379,184 @@ class MainWindow(QMainWindow):
         self.event_log.appendPlainText(cleaned)
         self._last_detection_log_message = cleaned
 
-    def _set_detection_controls(self, running: bool) -> None:
-        self.detect_button.setEnabled(not running)
-        self.sample_hz_spin.setEnabled(not running)
-        if running:
+    def _is_event_detection_running(self) -> bool:
+        return self._event_detection_busy or (self.detect_thread is not None and self.detect_thread.isRunning())
+
+    def _is_color_analysis_running(self) -> bool:
+        return self._color_analysis_busy or (self.color_thread is not None and self.color_thread.isRunning())
+
+    def _selected_color_roi_name(self) -> Optional[str]:
+        if self.color_roi_combo.count() <= 0:
+            return None
+        roi_name = self.color_roi_combo.currentText().strip()
+        if not roi_name or roi_name not in self.rois_rel:
+            return None
+        return roi_name
+
+    def _update_analysis_controls(self) -> None:
+        event_running = self._is_event_detection_running()
+        color_running = self._is_color_analysis_running()
+        any_running = event_running or color_running
+
+        self.sample_hz_spin.setEnabled(not any_running)
+
+        if event_running:
+            if self._event_detection_cancel_requested:
+                self.detect_button.setText("Olay Tespiti Durduruluyor...")
+                self.detect_button.setEnabled(False)
+            else:
+                self.detect_button.setText("Olay Tespitini Durdur")
+                self.detect_button.setEnabled(True)
+        else:
+            self.detect_button.setText("Olaylari Tespit Et")
+            self.detect_button.setEnabled(not color_running)
+
+        has_roi_choice = self.color_roi_combo.count() > 0
+        self.color_roi_combo.setEnabled(has_roi_choice and not any_running)
+        can_start_color = has_roi_choice and self.video_meta is not None and self._selected_color_roi_name() is not None
+        if color_running:
+            if self._color_analysis_cancel_requested:
+                self.color_analyze_button.setText("Renk Analizi Durduruluyor...")
+                self.color_analyze_button.setEnabled(False)
+            else:
+                self.color_analyze_button.setText("Renk Analizini Durdur")
+                self.color_analyze_button.setEnabled(True)
+        else:
+            self.color_analyze_button.setText("ROI Renk Analizi")
+            self.color_analyze_button.setEnabled(can_start_color and not event_running)
+
+        if any_running:
             self.save_timeline_button.setEnabled(False)
         else:
             self.save_timeline_button.setEnabled(bool(self.last_detected_events))
 
+    def _set_detection_controls(self, running: bool) -> None:
+        self._event_detection_busy = bool(running)
+        self._update_analysis_controls()
+
+    def _set_color_analysis_controls(self, running: bool) -> None:
+        self._color_analysis_busy = bool(running)
+        self._update_analysis_controls()
+
     def _invalidate_event_results(self) -> None:
         self.last_detected_events = []
-        self.save_timeline_button.setEnabled(False)
         self.event_progress.setValue(0)
         self._reset_event_table()
+        self._update_analysis_controls()
+
+    def _invalidate_roi_color_results(self, refresh_combo: bool = False) -> None:
+        self.last_roi_color_payload = None
+        self.color_progress.setValue(0)
+        self.roi_color_timeline.clear_data()
+        if refresh_combo:
+            self._refresh_color_roi_combo()
+        else:
+            self._update_analysis_controls()
+
+    def _refresh_color_roi_combo(self) -> None:
+        current_name = self.color_roi_combo.currentText().strip()
+        names: list[str] = []
+        for roi_name in self.roi_order:
+            if roi_name in self.rois_rel and roi_name not in names:
+                names.append(roi_name)
+        for roi_name in self.rois_rel:
+            if roi_name not in names:
+                names.append(roi_name)
+
+        target_name: Optional[str] = None
+        if current_name and current_name in names:
+            target_name = current_name
+        elif self.active_roi_name is not None and self.active_roi_name in names:
+            target_name = self.active_roi_name
+        elif names:
+            target_name = names[0]
+
+        self._syncing_color_roi_combo = True
+        try:
+            self.color_roi_combo.clear()
+            if names:
+                self.color_roi_combo.addItems(names)
+                if target_name is not None:
+                    target_index = self.color_roi_combo.findText(target_name)
+                    if target_index >= 0:
+                        self.color_roi_combo.setCurrentIndex(target_index)
+        finally:
+            self._syncing_color_roi_combo = False
+
+        self._update_analysis_controls()
+
+    def on_color_roi_changed(self, roi_name: str) -> None:
+        if self._syncing_color_roi_combo:
+            return
+
+        selected_name = roi_name.strip()
+        if self.last_roi_color_payload is not None:
+            payload_roi = str(self.last_roi_color_payload.get("roi_name", "")).strip()
+            if payload_roi and payload_roi != selected_name:
+                self._invalidate_roi_color_results(refresh_combo=False)
+
+        if selected_name:
+            self.statusBar().showMessage(f"Renk ROI: {selected_name}", 2200)
+
+    def on_color_zoom_in_clicked(self) -> None:
+        if self.roi_color_timeline.zoom_in():
+            self.statusBar().showMessage("Renk serisi: zoom in", 1800)
+
+    def on_color_zoom_out_clicked(self) -> None:
+        if self.roi_color_timeline.zoom_out():
+            self.statusBar().showMessage("Renk serisi: zoom out", 1800)
+
+    def on_color_zoom_reset_clicked(self) -> None:
+        if self.roi_color_timeline.reset_zoom():
+            self.statusBar().showMessage("Renk serisi: zoom sifirlandi", 1800)
 
     def _rois_to_serializable(self) -> dict:
         return {name: rect.to_dict() for name, rect in self.rois_rel.items()}
 
+    def on_detect_button_clicked(self) -> None:
+        if self._is_event_detection_running():
+            self.stop_event_detection()
+            return
+        self.start_event_detection()
+
+    def on_color_analyze_button_clicked(self) -> None:
+        if self._is_color_analysis_running():
+            self.stop_roi_color_analysis()
+            return
+        self.start_roi_color_analysis()
+
+    def stop_event_detection(self) -> None:
+        if not self._is_event_detection_running() or self.detect_worker is None:
+            self.statusBar().showMessage("Calisan olay tespiti yok.", 2000)
+            return
+        if self._event_detection_cancel_requested:
+            return
+        self._event_detection_cancel_requested = True
+        self.detect_worker.cancel()
+        self.event_progress.setValue(0)
+        self._append_event_log("Olay tespiti icin durdurma istendi.")
+        self.statusBar().showMessage("Olay tespiti durduruluyor...", 2500)
+        self._update_analysis_controls()
+
+    def stop_roi_color_analysis(self) -> None:
+        if not self._is_color_analysis_running() or self.color_worker is None:
+            self.statusBar().showMessage("Calisan ROI renk analizi yok.", 2000)
+            return
+        if self._color_analysis_cancel_requested:
+            return
+        self._color_analysis_cancel_requested = True
+        self.color_worker.cancel()
+        self.color_progress.setValue(0)
+        self._append_event_log("ROI renk analizi icin durdurma istendi.")
+        self.statusBar().showMessage("ROI renk analizi durduruluyor...", 2500)
+        self._update_analysis_controls()
+
     def start_event_detection(self) -> None:
-        if self.detect_thread is not None and self.detect_thread.isRunning():
+        if self._is_event_detection_running():
             QMessageBox.information(self, "Olay Tespit", "Analiz zaten calisiyor.")
+            return
+        if self._is_color_analysis_running():
+            QMessageBox.information(self, "Olay Tespit", "Renk analizi calisiyor. Once tamamlanmasini bekleyin.")
             return
 
         if self.video_meta is None:
@@ -830,6 +1576,7 @@ class MainWindow(QMainWindow):
         self.last_detected_events = []
         self.last_detection_sample_hz = int(self.sample_hz_spin.value())
         self._last_detection_log_message = ""
+        self._event_detection_cancel_requested = False
         self._reset_event_table()
         self.event_log.clear()
         self.event_progress.setValue(0)
@@ -857,6 +1604,8 @@ class MainWindow(QMainWindow):
         self.detect_thread.start()
 
     def on_event_detection_progress(self, percent: int, message: str) -> None:
+        if self._event_detection_cancel_requested:
+            return
         self.event_progress.setValue(max(0, min(100, int(percent))))
         if message.strip():
             self._append_event_log(message)
@@ -889,6 +1638,116 @@ class MainWindow(QMainWindow):
 
         self.event_progress.setValue(100)
         self._append_event_log("Analiz sonucu tabloya yazildi.")
+
+    def start_roi_color_analysis(self) -> None:
+        if self._is_color_analysis_running():
+            QMessageBox.information(self, "ROI Renk Analizi", "Renk analizi zaten calisiyor.")
+            return
+        if self._is_event_detection_running():
+            QMessageBox.information(self, "ROI Renk Analizi", "Olay tespiti calisiyor. Once bitmesini bekleyin.")
+            return
+
+        if self.video_meta is None:
+            QMessageBox.warning(self, "ROI Renk Analizi", "Once bir video acin.")
+            return
+        if not os.path.isfile(self.video_meta.source_video):
+            QMessageBox.warning(self, "ROI Renk Analizi", "Aktif video yolu bulunamadi.")
+            return
+
+        roi_name = self._selected_color_roi_name()
+        if roi_name is None:
+            QMessageBox.warning(self, "ROI Renk Analizi", "Renk analizi icin bir ROI secin.")
+            return
+
+        roi_rect = self.rois_rel.get(roi_name)
+        if roi_rect is None:
+            QMessageBox.warning(self, "ROI Renk Analizi", f"Secili ROI bulunamadi: {roi_name}")
+            return
+
+        self.main_tabs.setCurrentIndex(1)
+        self._invalidate_roi_color_results(refresh_combo=False)
+        self._append_event_log(f"ROI renk analizi basladi: {roi_name}")
+        self._color_analysis_cancel_requested = False
+        self._set_color_analysis_controls(running=True)
+
+        self.color_thread = QThread(self)
+        self.color_worker = RoiColorAnalysisWorker(
+            video_path=self.video_meta.source_video,
+            roi_name=roi_name,
+            roi_relative=roi_rect.to_dict(),
+            sample_hz=int(self.sample_hz_spin.value()),
+        )
+        self.color_worker.moveToThread(self.color_thread)
+
+        self.color_thread.started.connect(self.color_worker.run)
+        self.color_worker.progress.connect(self.on_roi_color_progress)
+        self.color_worker.result.connect(self.on_roi_color_result)
+        self.color_worker.error.connect(self.on_roi_color_error)
+        self.color_worker.finished.connect(self.on_roi_color_finished)
+        self.color_worker.finished.connect(self.color_thread.quit)
+        self.color_worker.finished.connect(self.color_worker.deleteLater)
+        self.color_thread.finished.connect(self.color_thread.deleteLater)
+        self.color_thread.finished.connect(self.on_roi_color_thread_finished)
+
+        self.color_thread.start()
+
+    def on_roi_color_progress(self, percent: int, message: str) -> None:
+        if self._color_analysis_cancel_requested:
+            return
+        self.color_progress.setValue(max(0, min(100, int(percent))))
+        if message.strip():
+            self._append_event_log(message)
+            self.statusBar().showMessage(message, 2200)
+
+    def on_roi_color_result(self, payload: dict) -> None:
+        self.last_roi_color_payload = dict(payload)
+        self.roi_color_timeline.set_data(self.last_roi_color_payload)
+        self.color_progress.setValue(100)
+
+        roi_name = str(self.last_roi_color_payload.get("roi_name", "")).strip() or "-"
+        raw_times = self.last_roi_color_payload.get("times")
+        sample_count = len(raw_times) if isinstance(raw_times, list) else 0
+        self._append_event_log(f"ROI renk analizi guncellendi: {roi_name} ({sample_count} ornek)")
+
+    def on_roi_color_time_selected(self, seconds: float, sample_index: int) -> None:
+        if self.video_meta is None:
+            return
+
+        frame_payload = self._read_video_frame_at_seconds(seconds)
+        if frame_payload is None:
+            self.statusBar().showMessage("Frame okunamadi.", 2500)
+            return
+
+        frame_bgr, frame_index = frame_payload
+        self._apply_current_frame(frame_bgr, frame_index)
+        self.roi_color_timeline.set_selected_index(sample_index)
+
+        roi_name = "-"
+        if self.last_roi_color_payload is not None:
+            roi_name = str(self.last_roi_color_payload.get("roi_name", "")).strip() or "-"
+        pretty_time = format_time_dk_sn_ms(seconds)
+        self.statusBar().showMessage(f"ROI {roi_name} zaman: {pretty_time}", 2800)
+
+    def on_roi_color_error(self, message: str) -> None:
+        self._append_event_log(f"Hata: {message}")
+        QMessageBox.critical(self, "ROI Renk Analizi", message)
+
+    def on_roi_color_finished(self) -> None:
+        self._set_color_analysis_controls(running=False)
+        if self._color_analysis_cancel_requested and not self.last_roi_color_payload:
+            self.color_progress.setValue(0)
+            self._append_event_log("ROI renk analizi kullanici tarafindan durduruldu.")
+            self.statusBar().showMessage("ROI renk analizi durduruldu.", 3000)
+        elif self.last_roi_color_payload:
+            self.statusBar().showMessage("ROI renk analizi tamamlandi.", 3000)
+        else:
+            self.statusBar().showMessage("ROI renk analizi bitti, sonuc uretilmedi.", 3000)
+        self._color_analysis_cancel_requested = False
+
+    def on_roi_color_thread_finished(self) -> None:
+        self.color_worker = None
+        self.color_thread = None
+        self._update_analysis_controls()
 
     def on_event_table_cell_clicked(self, row: int, col: int) -> None:
         if col not in (EVENT_COL_START, EVENT_COL_END):
@@ -988,14 +1847,20 @@ class MainWindow(QMainWindow):
 
     def on_event_detection_finished(self) -> None:
         self._set_detection_controls(running=False)
-        if self.last_detected_events:
+        if self._event_detection_cancel_requested and not self.last_detected_events:
+            self.event_progress.setValue(0)
+            self._append_event_log("Olay tespiti kullanici tarafindan durduruldu.")
+            self.statusBar().showMessage("Olay tespiti durduruldu.", 3000)
+        elif self.last_detected_events:
             self.statusBar().showMessage("Olay tespiti tamamlandi.", 3000)
         else:
             self.statusBar().showMessage("Olay tespiti bitti, sonuc uretilmedi.", 3000)
+        self._event_detection_cancel_requested = False
 
     def on_event_detection_thread_finished(self) -> None:
         self.detect_worker = None
         self.detect_thread = None
+        self._update_analysis_controls()
 
     def save_timeline_json(self) -> None:
         if not self.last_detected_events:
@@ -1112,6 +1977,7 @@ class MainWindow(QMainWindow):
         self.roi_order.append(cleaned_name)
         self.set_active_roi_name(cleaned_name)
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
 
     def rename_roi(self) -> None:
         current_name = self.active_roi_name
@@ -1143,6 +2009,7 @@ class MainWindow(QMainWindow):
 
         self.set_active_roi_name(cleaned_name)
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
 
     def delete_roi(self) -> None:
         current_name = self.active_roi_name
@@ -1164,20 +2031,35 @@ class MainWindow(QMainWindow):
 
         self.set_active_roi_name(next_active, announce=False)
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
         self.statusBar().showMessage(f"Deleted ROI: {current_name}", 2200)
 
     def on_draw_without_selection(self) -> None:
         self.statusBar().showMessage("Add or select an ROI before drawing.", 2600)
 
     def open_video_dialog(self) -> None:
+        initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
+        if not initial_dir or not os.path.isdir(initial_dir):
+            if self.video_meta is not None:
+                current_video_dir = os.path.dirname(self.video_meta.source_video)
+                if os.path.isdir(current_video_dir):
+                    initial_dir = current_video_dir
+        if not initial_dir:
+            initial_dir = os.getcwd()
+
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Video",
-            "",
+            initial_dir,
             "MP4 Files (*.mp4);;Video Files (*.mp4 *.mov *.mkv *.avi);;All Files (*.*)",
         )
         if not path:
             return
+
+        selected_dir = os.path.dirname(path)
+        if selected_dir and os.path.isdir(selected_dir):
+            self.settings.setValue(SETTINGS_LAST_VIDEO_DIR, selected_dir)
+
         self.load_video(path)
 
     def load_video(self, path: str) -> None:
@@ -1214,6 +2096,9 @@ class MainWindow(QMainWindow):
             frame_index=frame_index,
             source_video=path,
         )
+        video_dir = os.path.dirname(path)
+        if video_dir and os.path.isdir(video_dir):
+            self.settings.setValue(SETTINGS_LAST_VIDEO_DIR, video_dir)
         self._apply_current_frame(frame, frame_index)
 
         if self.pending_template_rois is not None:
@@ -1227,6 +2112,7 @@ class MainWindow(QMainWindow):
 
         self._update_event_video_label()
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
         self.statusBar().showMessage(f"Video loaded: {os.path.basename(path)}", 3000)
 
     def _build_display_rgb(self, frame_bgr: np.ndarray) -> np.ndarray:
@@ -1291,6 +2177,7 @@ class MainWindow(QMainWindow):
         self.canvas.set_rois(self.rois_rel)
         self.set_active_roi_name(roi_name, announce=False)
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
 
     def save_template(self) -> None:
         if self.video_meta is None or self.original_bgr is None:
@@ -1451,6 +2338,7 @@ class MainWindow(QMainWindow):
             self.set_active_roi_name(None, announce=False)
 
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
 
     def load_template_from_path(self, template_path: str, silent: bool) -> bool:
         try:
@@ -1501,6 +2389,7 @@ class MainWindow(QMainWindow):
         self.canvas.set_rois(self.rois_rel)
         self.set_active_roi_name(None, announce=False)
         self._invalidate_event_results()
+        self._invalidate_roi_color_results(refresh_combo=True)
         self.statusBar().showMessage("ROIs reset", 2000)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
@@ -1509,6 +2398,11 @@ class MainWindow(QMainWindow):
         if self.detect_thread is not None and self.detect_thread.isRunning():
             self.detect_thread.quit()
             self.detect_thread.wait(1500)
+        if self.color_worker is not None:
+            self.color_worker.cancel()
+        if self.color_thread is not None and self.color_thread.isRunning():
+            self.color_thread.quit()
+            self.color_thread.wait(1500)
         super().closeEvent(event)
 
 
@@ -1516,7 +2410,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
     window = MainWindow()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
 
 
