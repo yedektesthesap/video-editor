@@ -35,7 +35,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QSpinBox,
     QSizePolicy,
-    QTabWidget,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -91,32 +91,6 @@ QWidget {
 
 QMainWindow {
     background-color: #15171c;
-}
-
-QTabWidget::pane {
-    border: 1px solid #313744;
-    border-radius: 6px;
-    top: -1px;
-}
-
-QTabBar::tab {
-    background: #232831;
-    color: #b8c0cc;
-    border: 1px solid #3a414f;
-    border-bottom: none;
-    padding: 8px 14px;
-    margin-right: 2px;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-}
-
-QTabBar::tab:selected {
-    background: #2d3440;
-    color: #ffffff;
-}
-
-QTabBar::tab:hover:!selected {
-    background: #2a303a;
 }
 
 QGroupBox {
@@ -1131,6 +1105,8 @@ class MainWindow(QMainWindow):
         self.timeline_dirty = False
         self.startup_tab: Optional[QWidget] = None
         self.startup_completed = False
+        self._screen_history: list[str] = []
+        self._current_screen = "startup"
 
         self.canvas = VideoCanvas(self)
         self.canvas.roi_drawn.connect(self.on_roi_drawn)
@@ -1146,30 +1122,88 @@ class MainWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(8)
 
-        self.main_tabs = QTabWidget(self)
-        root_layout.addWidget(self.main_tabs)
+        nav_bar = QWidget(self)
+        nav_layout = QHBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(10)
+
+        self.back_button = QPushButton("< Geri")
+        self.back_button.clicked.connect(self.on_back_button_clicked)
+        self.back_button.setMinimumWidth(90)
+
+        self.screen_title_label = QLabel("Baslangic")
+        self.screen_title_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #f4f5f7;")
+
+        nav_layout.addWidget(self.back_button)
+        nav_layout.addWidget(self.screen_title_label)
+        nav_layout.addStretch(1)
+        root_layout.addWidget(nav_bar)
+
+        self.main_stack = QStackedWidget(self)
+        root_layout.addWidget(self.main_stack, stretch=1)
 
         self.startup_tab = QWidget(self)
         self._build_startup_tab(self.startup_tab)
-        self.main_tabs.addTab(self.startup_tab, "Baslangic")
+        self.main_stack.addWidget(self.startup_tab)
 
         self.roi_tab = QWidget(self)
         self._build_roi_tab(self.roi_tab)
-        self.main_tabs.addTab(self.roi_tab, "ROI Secimi")
+        self.main_stack.addWidget(self.roi_tab)
 
         self.event_tab = QWidget(self)
         self._build_event_tab(self.event_tab)
-        self.main_tabs.addTab(self.event_tab, "Olay Tespit")
+        self.main_stack.addWidget(self.event_tab)
 
-        roi_index = self.main_tabs.indexOf(self.roi_tab)
-        event_index = self.main_tabs.indexOf(self.event_tab)
-        if roi_index >= 0:
-            self.main_tabs.setTabEnabled(roi_index, False)
-        if event_index >= 0:
-            self.main_tabs.setTabEnabled(event_index, False)
-        if self.startup_tab is not None:
-            self.main_tabs.setCurrentWidget(self.startup_tab)
+        self._set_current_screen("startup", push_history=False)
+
+    def _screen_title(self, screen: str) -> str:
+        if screen == "startup":
+            return "Baslangic"
+        if screen == "roi":
+            return "ROI Secimi"
+        if screen == "event":
+            return "Olay Tespit"
+        return "Ekran"
+
+    def _screen_widget(self, screen: str) -> Optional[QWidget]:
+        if screen == "startup":
+            return self.startup_tab
+        if screen == "roi":
+            return self.roi_tab
+        if screen == "event":
+            return self.event_tab
+        return None
+
+    def _set_current_screen(self, screen: str, push_history: bool) -> bool:
+        target = self._screen_widget(screen)
+        if target is None:
+            return False
+
+        if screen == self._current_screen:
+            self._update_navigation_bar()
+            return True
+
+        current = self._screen_widget(self._current_screen)
+        if push_history and current is not None:
+            self._screen_history.append(self._current_screen)
+
+        self._current_screen = screen
+        self.main_stack.setCurrentWidget(target)
+        self._update_navigation_bar()
+        return True
+
+    def _update_navigation_bar(self) -> None:
+        self.back_button.setEnabled(bool(self._screen_history))
+        self.screen_title_label.setText(self._screen_title(self._current_screen))
+
+    def on_back_button_clicked(self) -> None:
+        if not self._screen_history:
+            return
+        previous = self._screen_history.pop()
+        self._set_current_screen(previous, push_history=False)
 
     def _build_startup_tab(self, container: QWidget) -> None:
         layout = QVBoxLayout(container)
@@ -1487,21 +1521,7 @@ class MainWindow(QMainWindow):
         self._complete_startup_selection(open_event_tab=True)
 
     def _complete_startup_selection(self, open_event_tab: bool) -> None:
-        if self.startup_tab is not None:
-            startup_index = self.main_tabs.indexOf(self.startup_tab)
-            if startup_index >= 0:
-                self.main_tabs.removeTab(startup_index)
-            self.startup_tab = None
-
         self.startup_completed = True
-
-        roi_index = self.main_tabs.indexOf(self.roi_tab)
-        event_index = self.main_tabs.indexOf(self.event_tab)
-        if roi_index >= 0:
-            self.main_tabs.setTabEnabled(roi_index, True)
-        if event_index >= 0:
-            self.main_tabs.setTabEnabled(event_index, True)
-
         self._update_analysis_controls()
 
         if open_event_tab:
@@ -1758,14 +1778,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Event {event_id} zamanlari temizlendi.", 2300)
 
     def switch_to_roi_tab(self) -> None:
-        roi_index = self.main_tabs.indexOf(self.roi_tab)
-        if roi_index >= 0:
-            self.main_tabs.setCurrentIndex(roi_index)
+        self._set_current_screen("roi", push_history=True)
 
     def switch_to_event_tab(self) -> None:
-        event_index = self.main_tabs.indexOf(self.event_tab)
-        if event_index >= 0:
-            self.main_tabs.setCurrentIndex(event_index)
+        self._set_current_screen("event", push_history=True)
 
     def _set_table_item(self, row: int, col: int, value: str) -> None:
         item = QTableWidgetItem(value)
