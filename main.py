@@ -1196,7 +1196,9 @@ class MainWindow(QMainWindow):
         return True
 
     def _update_navigation_bar(self) -> None:
-        self.back_button.setEnabled(bool(self._screen_history))
+        is_startup_screen = self._current_screen == "startup"
+        self.back_button.setVisible(not is_startup_screen)
+        self.back_button.setEnabled((not is_startup_screen) and bool(self._screen_history))
         self.screen_title_label.setText(self._screen_title(self._current_screen))
 
     def on_back_button_clicked(self) -> None:
