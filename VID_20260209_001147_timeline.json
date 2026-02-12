@@ -1,0 +1,79 @@
+{
+  "source_video": "C:/Users/arge3/Downloads/VID_20260209_001147.mp4",
+  "template_path": "C:/Users/arge3/Desktop/MyFile/VMshare/video-editor/template1.json",
+  "sample_hz": 10,
+  "events": [
+    {
+      "id": 1,
+      "name": "sol1_to_mix1",
+      "target_roi": "mix1",
+      "type": "pour",
+      "start": 2.36,
+      "end": 4.11,
+      "confidence": null
+    },
+    {
+      "id": 2,
+      "name": "sol2_to_mix2",
+      "target_roi": "mix2",
+      "type": "pour",
+      "start": 5.36,
+      "end": 9.5,
+      "confidence": null
+    },
+    {
+      "id": 3,
+      "name": "sol3_to_mix3",
+      "target_roi": "mix3",
+      "type": "pour",
+      "start": 10.45,
+      "end": 17.53,
+      "confidence": null
+    },
+    {
+      "id": 4,
+      "name": "sol4_to_mix4",
+      "target_roi": "mix4",
+      "type": "pour",
+      "start": 19.03,
+      "end": 29.11,
+      "confidence": null
+    },
+    {
+      "id": 5,
+      "name": "sag4_to_mix4_mix",
+      "target_roi": "mix4",
+      "type": "pour_mix",
+      "start": 60.23,
+      "end": 67.07,
+      "confidence": null
+    },
+    {
+      "id": 6,
+      "name": "sag3_to_mix3_mix",
+      "target_roi": "mix3",
+      "type": "pour_mix",
+      "start": 80.67,
+      "end": 89.75,
+      "confidence": null
+    },
+    {
+      "id": 7,
+      "name": "sag2_to_mix2_mix",
+      "target_roi": "mix2",
+      "type": "pour_mix",
+      "start": 103.79,
+      "end": 115.55,
+      "confidence": null
+    },
+    {
+      "id": 8,
+      "name": "sag1_to_mix1_mix",
+      "target_roi": "mix1",
+      "type": "pour_mix",
+      "start": 132.0,
+      "end": 146.22,
+      "confidence": null
+    }
+  ]
+}
