@@ -1106,9 +1106,8 @@ class MainWindow(QMainWindow):
         self.startup_tab: Optional[QWidget] = None
         self.video_select_tab: Optional[QWidget] = None
         self.startup_completed = False
-        self._next_screen_after_video = "roi"
         self._screen_history: list[str] = []
-        self._current_screen = "startup"
+        self._current_screen = "video"
 
         self.canvas = VideoCanvas(self)
         self.canvas.roi_drawn.connect(self.on_roi_drawn)
@@ -1136,7 +1135,7 @@ class MainWindow(QMainWindow):
         self.back_button.clicked.connect(self.on_back_button_clicked)
         self.back_button.setMinimumWidth(90)
 
-        self.screen_title_label = QLabel("Baslangic")
+        self.screen_title_label = QLabel("Video Secimi")
         self.screen_title_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #f4f5f7;")
 
         nav_layout.addWidget(self.back_button)
@@ -1163,7 +1162,7 @@ class MainWindow(QMainWindow):
         self._build_event_tab(self.event_tab)
         self.main_stack.addWidget(self.event_tab)
 
-        self._set_current_screen("startup", push_history=False)
+        self._set_current_screen("video", push_history=False)
 
     def _screen_title(self, screen: str) -> str:
         if screen == "startup":
@@ -1582,38 +1581,24 @@ class MainWindow(QMainWindow):
             self.shortcuts.append(shortcut)
 
     def on_startup_auto_clicked(self) -> None:
-        if not self._apply_detection_mode(
-            DETECTION_MODE_AUTO,
-            source="startup",
-            require_video_if_manual=False,
-        ):
+        if not self._apply_detection_mode(DETECTION_MODE_AUTO, source="startup"):
             return
-        self._begin_video_selection_flow(target_screen="roi")
+        self._complete_startup_selection(open_event_tab=False)
 
     def on_startup_manual_clicked(self) -> None:
-        if not self._apply_detection_mode(
-            DETECTION_MODE_MANUAL,
-            source="startup",
-            require_video_if_manual=False,
-        ):
+        if not self._apply_detection_mode(DETECTION_MODE_MANUAL, source="startup"):
             return
-        self._begin_video_selection_flow(target_screen="event")
-
-    def _begin_video_selection_flow(self, target_screen: str) -> None:
-        if target_screen not in ("roi", "event"):
-            target_screen = "roi"
-
-        self.startup_completed = True
-        self._next_screen_after_video = target_screen
-        self._update_video_select_screen_text()
-        self._update_analysis_controls()
-        self._set_current_screen("video", push_history=True)
+        self._complete_startup_selection(open_event_tab=True)
 
     def on_video_select_screen_pick_clicked(self) -> None:
         if not self.open_video_dialog():
             return
+        self._set_current_screen("startup", push_history=False)
 
-        if self._next_screen_after_video == "event":
+    def _complete_startup_selection(self, open_event_tab: bool) -> None:
+        self.startup_completed = True
+        self._update_analysis_controls()
+        if open_event_tab:
             self.switch_to_event_tab()
         else:
             self.switch_to_roi_tab()
