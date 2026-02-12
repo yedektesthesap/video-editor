@@ -2435,7 +2435,10 @@ class MainWindow(QMainWindow):
                 return
 
         initial_dir = os.path.dirname(self.current_template_path) if self.current_template_path else os.getcwd()
-        initial_path = os.path.join(initial_dir, "timeline.json")
+        video_name = os.path.splitext(os.path.basename(self.video_meta.source_video))[0].strip()
+        if not video_name:
+            video_name = "video"
+        initial_path = os.path.join(initial_dir, f"{video_name}_timeline.json")
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "timeline.json Kaydet",
