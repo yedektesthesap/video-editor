@@ -1558,6 +1558,7 @@ class MainWindow(QMainWindow):
         upper_section = QWidget(right_panel)
         upper_layout = QVBoxLayout(upper_section)
         upper_layout.setContentsMargins(0, 0, 0, 0)
+        upper_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         upper_layout.addWidget(self.event_auto_controls_widget)
         upper_layout.addWidget(self.manual_controls_box)
         upper_layout.addWidget(self.event_table_frame)
@@ -1570,6 +1571,7 @@ class MainWindow(QMainWindow):
         self.edit_button.clicked.connect(self.on_open_edit_clicked)
         event_table_actions_layout.addWidget(self.edit_button)
         upper_layout.addLayout(event_table_actions_layout)
+        upper_layout.addStretch(1)
 
         self.event_lower_section = QWidget(right_panel)
         lower_layout = QVBoxLayout(self.event_lower_section)
