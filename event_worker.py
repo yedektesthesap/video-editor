@@ -135,6 +135,11 @@ class VideoEditWorker(QObject):
         target_width: Optional[int] = None,
         target_height: Optional[int] = None,
         target_fps: Optional[float] = None,
+        remove_audio: bool = False,
+        enable_speed: bool = False,
+        speed_factor: Optional[float] = None,
+        enable_audio_effect: bool = False,
+        audio_effect_preset: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.ffmpeg_path = str(ffmpeg_path)
@@ -148,6 +153,11 @@ class VideoEditWorker(QObject):
         self.target_width = int(target_width) if target_width is not None else None
         self.target_height = int(target_height) if target_height is not None else None
         self.target_fps = float(target_fps) if target_fps is not None else None
+        self.remove_audio = bool(remove_audio)
+        self.enable_speed = bool(enable_speed)
+        self.speed_factor = float(speed_factor) if speed_factor is not None else None
+        self.enable_audio_effect = bool(enable_audio_effect)
+        self.audio_effect_preset = str(audio_effect_preset).strip().lower() if audio_effect_preset is not None else None
         self._cancel_requested = False
         self._process: Optional[subprocess.Popen[str]] = None
 
@@ -176,7 +186,7 @@ class VideoEditWorker(QObject):
             self.finished.emit()
 
     def _run_ffmpeg_edit(self) -> dict:
-        if not self.enable_cut and not self.enable_resize:
+        if not self.enable_cut and not self.enable_resize and (not self.remove_audio) and (not self.enable_speed) and (not self.enable_audio_effect):
             raise RuntimeError("En az bir edit islemi secilmelidir.")
         if not os.path.isfile(self.input_path):
             raise RuntimeError(f"Girdi videosu bulunamadi: {self.input_path}")
@@ -204,11 +214,29 @@ class VideoEditWorker(QObject):
             if self.target_width is None and self.target_fps is None:
                 raise RuntimeError("Cozunurluk/FPS adimi icin en az bir hedef secilmelidir.")
 
+        if self.enable_speed:
+            if self.speed_factor is None or self.speed_factor <= 0.0:
+                raise RuntimeError("Video hizi icin gecerli hiz degeri gereklidir.")
+            if abs(self.speed_factor - 1.0) < 0.001:
+                raise RuntimeError("Video hizi 1.0x olamaz.")
+
+        if self.enable_audio_effect:
+            if not self.audio_effect_preset:
+                raise RuntimeError("Ses efekti secilmedi.")
+            if self.audio_effect_preset == "none":
+                raise RuntimeError("Ses efekti 'Yok' olamaz.")
+
         operation_names: list[str] = []
         if self.enable_cut:
             operation_names.append("cut")
         if self.enable_resize:
             operation_names.append("resize")
+        if self.remove_audio:
+            operation_names.append("audio_remove")
+        if self.enable_speed:
+            operation_names.append("speed")
+        if self.enable_audio_effect:
+            operation_names.append("audio_effect")
 
         input_path = self.input_path
         output_path = self.output_path
@@ -232,7 +260,7 @@ class VideoEditWorker(QObject):
                     )
                     step_label = "Cut"
                     step_duration = cut_duration
-                else:
+                elif operation_name == "resize":
                     command = self._build_resize_command(
                         ffmpeg_binary=ffmpeg_binary,
                         input_path=input_path,
@@ -243,6 +271,34 @@ class VideoEditWorker(QObject):
                         target_fps=self.target_fps,
                     )
                     step_label = "Cozunurluk/FPS"
+                    step_duration = estimated_duration
+                elif operation_name == "audio_remove":
+                    command = self._build_remove_audio_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                    )
+                    step_label = "Ses Silme"
+                    step_duration = estimated_duration
+                elif operation_name == "speed":
+                    command = self._build_speed_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=has_audio,
+                        speed_factor=self.speed_factor,
+                    )
+                    step_label = "Video Hizi"
+                    step_duration = estimated_duration
+                else:
+                    command = self._build_audio_effect_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=has_audio,
+                        effect_preset=self.audio_effect_preset,
+                    )
+                    step_label = "Ses Efekti"
                     step_duration = estimated_duration
 
                 self._run_ffmpeg_step(
@@ -258,6 +314,8 @@ class VideoEditWorker(QObject):
                 has_audio = self._detect_audio_stream(ffmpeg_binary, input_path)
                 if operation_name == "cut":
                     estimated_duration = cut_duration
+                elif operation_name == "speed" and self.speed_factor is not None and estimated_duration is not None:
+                    estimated_duration = float(estimated_duration) / float(self.speed_factor)
 
             final_duration = self._probe_duration_seconds(ffmpeg_binary, self.output_path)
             if final_duration is None:
@@ -388,6 +446,180 @@ class VideoEditWorker(QObject):
             command.extend(["-map", "0:a?", "-c:a", "alac"])
         command.extend(["-movflags", "+faststart", output_path])
         return command
+
+    def _build_remove_audio_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+    ) -> list[str]:
+        return [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "copy",
+            "-an",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+
+    def _build_speed_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+        has_audio: bool,
+        speed_factor: Optional[float],
+    ) -> list[str]:
+        if speed_factor is None or speed_factor <= 0.0:
+            raise RuntimeError("Video hizi icin gecersiz hiz degeri.")
+
+        atempo_filter = self._build_atempo_filter(speed_factor)
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+            "-filter:v",
+            f"setpts=PTS/{float(speed_factor):.6f}",
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            self.preset,
+            "-crf",
+            str(self.crf),
+        ]
+        if has_audio:
+            command.extend(
+                [
+                    "-filter:a",
+                    atempo_filter,
+                    "-map",
+                    "0:a:0",
+                    "-c:a",
+                    "alac",
+                ]
+            )
+        command.extend(["-movflags", "+faststart", output_path])
+        return command
+
+    def _build_audio_effect_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+        has_audio: bool,
+        effect_preset: Optional[str],
+    ) -> list[str]:
+        effect_chain = self._audio_effect_filter_chain(effect_preset)
+        if not effect_chain:
+            raise RuntimeError("Ses efekti filtresi olusturulamadi.")
+
+        common_prefix = [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+        ]
+        if has_audio:
+            filter_complex = (
+                f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo[orig];"
+                f"[0:a]{effect_chain},aformat=sample_rates=48000:channel_layouts=stereo,volume=0.55[fx];"
+                f"[orig][fx]amix=inputs=2:normalize=0:dropout_transition=0[aout]"
+            )
+            command = common_prefix + [
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "alac",
+                "-movflags",
+                "+faststart",
+                output_path,
+            ]
+            return command
+
+        filter_complex = (
+            f"[1:a]{effect_chain},aformat=sample_rates=48000:channel_layouts=stereo,volume=0.8[aout]"
+        )
+        command = common_prefix + [
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=220:sample_rate=48000",
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "0:v:0",
+            "-map",
+            "[aout]",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "alac",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        return command
+
+    @staticmethod
+    def _audio_effect_filter_chain(effect_preset: Optional[str]) -> str:
+        key = str(effect_preset or "").strip().lower()
+        if key == "bass_boost":
+            return "bass=g=8:f=110:w=0.6"
+        if key == "echo":
+            return "aecho=0.8:0.88:45:0.35"
+        if key == "phone":
+            return "highpass=f=300,lowpass=f=3200,acompressor=threshold=-19dB:ratio=3:attack=5:release=50"
+        return ""
+
+    @staticmethod
+    def _build_atempo_filter(speed_factor: float) -> str:
+        if speed_factor <= 0.0:
+            raise RuntimeError("Atempo icin hiz degeri pozitif olmali.")
+
+        working = float(speed_factor)
+        chain: list[str] = []
+        while working > 2.0:
+            chain.append("atempo=2.0")
+            working /= 2.0
+        while working < 0.5:
+            chain.append("atempo=0.5")
+            working /= 0.5
+        chain.append(f"atempo={working:.6f}")
+        return ",".join(chain)
 
     def _run_ffmpeg_step(
         self,
