@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSlider,
     QSplitter,
     QSpinBox,
     QSizePolicy,
@@ -56,6 +57,8 @@ SETTINGS_LAST_TEMPLATE_PATH = "last_template_path"
 SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
+DETECTION_MODE_AUTO = "auto"
+DETECTION_MODE_MANUAL = "manual"
 
 SOURCE_START_SENSITIVITY_PRESETS: dict[str, dict[str, float]] = {
     "Hassas": {
@@ -1097,6 +1100,7 @@ class MainWindow(QMainWindow):
 
         self.original_bgr: Optional[np.ndarray] = None
         self.video_meta: Optional[VideoMeta] = None
+        self.video_frame_count = 0
 
         self.rois_rel: Dict[str, RelativeRect] = {}
         self.roi_order: list[str] = []
@@ -1117,10 +1121,16 @@ class MainWindow(QMainWindow):
         self.last_detection_sample_hz = 10
         self._last_detection_log_message = ""
         self._syncing_color_roi_combo = False
+        self._syncing_mode_combo = False
+        self._syncing_manual_slider = False
         self._event_detection_busy = False
         self._color_analysis_busy = False
         self._event_detection_cancel_requested = False
         self._color_analysis_cancel_requested = False
+        self.detection_mode: Optional[str] = None
+        self.timeline_dirty = False
+        self.startup_tab: Optional[QWidget] = None
+        self.startup_completed = False
 
         self.canvas = VideoCanvas(self)
         self.canvas.roi_drawn.connect(self.on_roi_drawn)
@@ -1140,13 +1150,70 @@ class MainWindow(QMainWindow):
         self.main_tabs = QTabWidget(self)
         root_layout.addWidget(self.main_tabs)
 
-        roi_tab = QWidget(self)
-        self._build_roi_tab(roi_tab)
-        self.main_tabs.addTab(roi_tab, "ROI Secimi")
+        self.startup_tab = QWidget(self)
+        self._build_startup_tab(self.startup_tab)
+        self.main_tabs.addTab(self.startup_tab, "Baslangic")
 
-        event_tab = QWidget(self)
-        self._build_event_tab(event_tab)
-        self.main_tabs.addTab(event_tab, "Olay Tespit")
+        self.roi_tab = QWidget(self)
+        self._build_roi_tab(self.roi_tab)
+        self.main_tabs.addTab(self.roi_tab, "ROI Secimi")
+
+        self.event_tab = QWidget(self)
+        self._build_event_tab(self.event_tab)
+        self.main_tabs.addTab(self.event_tab, "Olay Tespit")
+
+        roi_index = self.main_tabs.indexOf(self.roi_tab)
+        event_index = self.main_tabs.indexOf(self.event_tab)
+        if roi_index >= 0:
+            self.main_tabs.setTabEnabled(roi_index, False)
+        if event_index >= 0:
+            self.main_tabs.setTabEnabled(event_index, False)
+        if self.startup_tab is not None:
+            self.main_tabs.setCurrentWidget(self.startup_tab)
+
+    def _build_startup_tab(self, container: QWidget) -> None:
+        layout = QVBoxLayout(container)
+        layout.addStretch(1)
+
+        title = QLabel("Olay Tespit Modu Secimi")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 22px; font-weight: 700;")
+
+        subtitle = QLabel("Devam etmeden once bir calisma modu secin.")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("color: #b8c0cc;")
+
+        auto_button = QPushButton("Otomatik Olay Tespiti")
+        auto_button.setMinimumHeight(46)
+        auto_button.clicked.connect(self.on_startup_auto_clicked)
+
+        manual_button = QPushButton("Manuel Olay Tespiti")
+        manual_button.setMinimumHeight(46)
+        manual_button.clicked.connect(self.on_startup_manual_clicked)
+
+        button_box = QWidget(container)
+        button_layout = QVBoxLayout(button_box)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+        button_layout.setSpacing(10)
+        button_layout.addWidget(auto_button)
+        button_layout.addWidget(manual_button)
+
+        wrapper = QWidget(container)
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(8)
+        wrapper_layout.addWidget(title)
+        wrapper_layout.addWidget(subtitle)
+        wrapper_layout.addWidget(button_box)
+        wrapper.setMaximumWidth(460)
+
+        center_row = QHBoxLayout()
+        center_row.addStretch(1)
+        center_row.addWidget(wrapper)
+        center_row.addStretch(1)
+
+        layout.addLayout(center_row)
+        layout.addStretch(2)
 
     def _build_roi_tab(self, container: QWidget) -> None:
         main_layout = QHBoxLayout(container)
@@ -1347,8 +1414,59 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(lambda roi_index=index - 1: self.select_roi_by_index(roi_index))
             self.shortcuts.append(shortcut)
 
+    def on_startup_auto_clicked(self) -> None:
+        if not self._apply_detection_mode(DETECTION_MODE_AUTO, source="startup"):
+            return
+        self._complete_startup_selection(open_event_tab=False)
+
+    def on_startup_manual_clicked(self) -> None:
+        if not self._apply_detection_mode(DETECTION_MODE_MANUAL, source="startup"):
+            return
+        self._complete_startup_selection(open_event_tab=True)
+
+    def _complete_startup_selection(self, open_event_tab: bool) -> None:
+        if self.startup_tab is not None:
+            startup_index = self.main_tabs.indexOf(self.startup_tab)
+            if startup_index >= 0:
+                self.main_tabs.removeTab(startup_index)
+            self.startup_tab = None
+
+        self.startup_completed = True
+
+        roi_index = self.main_tabs.indexOf(self.roi_tab)
+        event_index = self.main_tabs.indexOf(self.event_tab)
+        if roi_index >= 0:
+            self.main_tabs.setTabEnabled(roi_index, True)
+        if event_index >= 0:
+            self.main_tabs.setTabEnabled(event_index, True)
+
+        if open_event_tab:
+            self.switch_to_event_tab()
+        else:
+            self.switch_to_roi_tab()
+
+    def _apply_detection_mode(self, mode: Optional[str], source: str) -> bool:
+        del source
+        if mode not in (DETECTION_MODE_AUTO, DETECTION_MODE_MANUAL, None):
+            return False
+        if mode == self.detection_mode:
+            self._update_analysis_controls()
+            return True
+
+        self.detection_mode = mode
+        self.timeline_dirty = False
+        self._update_analysis_controls()
+        return True
+
+    def switch_to_roi_tab(self) -> None:
+        roi_index = self.main_tabs.indexOf(self.roi_tab)
+        if roi_index >= 0:
+            self.main_tabs.setCurrentIndex(roi_index)
+
     def switch_to_event_tab(self) -> None:
-        self.main_tabs.setCurrentIndex(1)
+        event_index = self.main_tabs.indexOf(self.event_tab)
+        if event_index >= 0:
+            self.main_tabs.setCurrentIndex(event_index)
 
     def _set_table_item(self, row: int, col: int, value: str) -> None:
         item = QTableWidgetItem(value)
