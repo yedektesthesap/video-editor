@@ -1480,6 +1480,7 @@ class MainWindow(QMainWindow):
         event_table_frame_layout.addWidget(self.event_table)
 
         self.manual_controls_box = QGroupBox("Manuel Olay Atama")
+        self.manual_controls_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         manual_layout = QVBoxLayout(self.manual_controls_box)
         manual_layout.setContentsMargins(8, 8, 8, 8)
         manual_layout.setSpacing(6)
