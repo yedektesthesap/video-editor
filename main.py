@@ -1916,6 +1916,27 @@ class MainWindow(QMainWindow):
             self._set_time_table_item(row, EVENT_COL_START, start_seconds)
             self._set_time_table_item(row, EVENT_COL_END, end_seconds)
             self._set_table_item(row, 6, confidence_text)
+        self._update_analysis_controls()
+
+    def _has_complete_event_times(self) -> bool:
+        if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
+            return False
+
+        for row, _event_info in enumerate(EVENT_DEFINITIONS):
+            if row >= len(self.last_detected_events):
+                return False
+            event_payload = self.last_detected_events[row]
+            raw_start = event_payload.get("start")
+            raw_end = event_payload.get("end")
+            if raw_start is None or raw_end is None:
+                return False
+            try:
+                float(raw_start)
+                float(raw_end)
+            except (TypeError, ValueError):
+                return False
+
+        return True
 
     def _set_event_frame_preview_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         if pixmap is None or pixmap.isNull():
@@ -2039,7 +2060,7 @@ class MainWindow(QMainWindow):
         self.manual_assign_end_button.setEnabled(manual_controls_enabled and manual_row_selected)
         self.manual_clear_row_button.setEnabled(manual_controls_enabled and manual_row_selected)
 
-        self.save_timeline_button.setEnabled(mode_ready and (not any_running) and bool(self.last_detected_events))
+        self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
 
     def _set_detection_controls(self, running: bool) -> None:
         self._event_detection_busy = bool(running)
