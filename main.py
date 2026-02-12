@@ -1406,9 +1406,6 @@ class MainWindow(QMainWindow):
         self.event_mode_combo.addItem("Otomatik", DETECTION_MODE_AUTO)
         self.event_mode_combo.addItem("Manuel", DETECTION_MODE_MANUAL)
 
-        self.event_open_video_button = QPushButton("Video Ac")
-        self.event_open_video_button.clicked.connect(self.open_video_dialog)
-
         self.sample_hz_spin = QSpinBox()
         self.sample_hz_spin.setRange(5, 12)
         self.sample_hz_spin.setValue(10)
@@ -1432,7 +1429,6 @@ class MainWindow(QMainWindow):
         self.color_analyze_button = QPushButton("ROI Renk Analizi")
         self.color_analyze_button.clicked.connect(self.on_color_analyze_button_clicked)
 
-        controls_layout.addWidget(self.event_open_video_button)
         controls_layout.addWidget(self.sample_hz_spin)
         controls_layout.addWidget(self.source_sensitivity_label)
         controls_layout.addWidget(self.source_sensitivity_combo)
@@ -1975,8 +1971,6 @@ class MainWindow(QMainWindow):
 
         self._sync_event_mode_combo_to_state()
         self.event_mode_combo.setEnabled(self.startup_completed and mode_ready and not any_running)
-        self.event_open_video_button.setEnabled(not any_running)
-
         self.sample_hz_spin.setVisible(is_auto)
         self.source_sensitivity_label.setVisible(is_auto)
         self.source_sensitivity_combo.setVisible(is_auto)
