@@ -1498,16 +1498,12 @@ class MainWindow(QMainWindow):
         step_layout.addStretch(1)
 
         assign_layout = QHBoxLayout()
-        self.manual_assign_start_button = QPushButton("Start Ata")
-        self.manual_assign_end_button = QPushButton("End Ata")
+        self.manual_assign_hint_label = QLabel("Atamak icin tabloda Start/End hucrelerine tiklayin.")
+        self.manual_assign_hint_label.setStyleSheet("color: #9aa4b7;")
         self.manual_clear_row_button = QPushButton("Satiri Temizle")
-        self.manual_assign_start_button.clicked.connect(self.on_manual_assign_start_clicked)
-        self.manual_assign_end_button.clicked.connect(self.on_manual_assign_end_clicked)
         self.manual_clear_row_button.clicked.connect(self.on_manual_clear_row_clicked)
-        assign_layout.addWidget(self.manual_assign_start_button)
-        assign_layout.addWidget(self.manual_assign_end_button)
+        assign_layout.addWidget(self.manual_assign_hint_label, stretch=1)
         assign_layout.addWidget(self.manual_clear_row_button)
-        assign_layout.addStretch(1)
 
         manual_layout.addLayout(nav_layout)
         manual_layout.addWidget(self.manual_frame_slider)
@@ -1807,10 +1803,15 @@ class MainWindow(QMainWindow):
             frame_delta = 1 if delta_seconds > 0 else -1
         self.step_manual_frame(frame_delta)
 
-    def _assign_manual_event_time(self, field_name: str) -> None:
+    def _assign_manual_event_time(self, field_name: str, row_override: Optional[int] = None) -> None:
         if self.detection_mode != DETECTION_MODE_MANUAL:
             return
-        row = self._manual_selected_row()
+        if row_override is not None:
+            row = int(row_override)
+            if row < 0 or row >= len(self.last_detected_events):
+                return
+        else:
+            row = self._manual_selected_row()
         if row is None:
             QMessageBox.information(self, "Manuel Olay", "Start/End atamak icin bir event satiri secin.")
             return
@@ -1830,12 +1831,6 @@ class MainWindow(QMainWindow):
         self.event_table.selectRow(row)
         event_id = payload.get("id", row + 1)
         self.statusBar().showMessage(f"Event {event_id} {field_name} atandi: {format_time_dk_sn_ms(seconds)}", 2600)
-
-    def on_manual_assign_start_clicked(self) -> None:
-        self._assign_manual_event_time("start")
-
-    def on_manual_assign_end_clicked(self) -> None:
-        self._assign_manual_event_time("end")
 
     def on_manual_clear_row_clicked(self) -> None:
         if self.detection_mode != DETECTION_MODE_MANUAL:
@@ -1875,7 +1870,10 @@ class MainWindow(QMainWindow):
             item.setToolTip("Bu olay icin zaman bilgisi yok.")
         else:
             item.setForeground(QColor("#7ec8ff"))
-            item.setToolTip("Tikla: ilgili frame'i goster.")
+            if self.detection_mode == DETECTION_MODE_MANUAL:
+                item.setToolTip("Tikla: o anki sureyi bu hucreye ata.")
+            else:
+                item.setToolTip("Tikla: ilgili frame'i goster.")
         self.event_table.setItem(row, col, item)
 
     def _reset_event_table(self) -> None:
@@ -2067,8 +2065,6 @@ class MainWindow(QMainWindow):
         self.manual_step_minus_frame_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_frame_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_sec_button.setEnabled(manual_controls_enabled)
-        self.manual_assign_start_button.setEnabled(manual_controls_enabled and manual_row_selected)
-        self.manual_assign_end_button.setEnabled(manual_controls_enabled and manual_row_selected)
         self.manual_clear_row_button.setEnabled(manual_controls_enabled and manual_row_selected)
 
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
@@ -2405,6 +2401,12 @@ class MainWindow(QMainWindow):
             return
         if row < 0 or row >= len(self.last_detected_events):
             return
+
+        if self.detection_mode == DETECTION_MODE_MANUAL:
+            field_name = "start" if col == EVENT_COL_START else "end"
+            self._assign_manual_event_time(field_name, row_override=row)
+            return
+
         if self.video_meta is None:
             return
 
