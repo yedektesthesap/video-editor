@@ -1168,7 +1168,7 @@ class MainWindow(QMainWindow):
         if screen == "startup":
             return ""
         if screen == "video":
-            return "Video Secimi"
+            return ""
         if screen == "roi":
             return "ROI Secimi"
         if screen == "event":
