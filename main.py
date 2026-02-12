@@ -1888,10 +1888,11 @@ class MainWindow(QMainWindow):
         self.source_sensitivity_combo.setVisible(is_auto)
         self.detect_button.setVisible(is_auto)
         self.manual_controls_box.setVisible(is_manual)
-        self.event_lower_section.setVisible(is_auto)
-        if is_auto:
+        if is_auto and not self.event_lower_section.isVisible():
+            self.event_lower_section.setVisible(True)
             self.event_vertical_splitter.setSizes([420, 320])
-        else:
+        elif is_manual and self.event_lower_section.isVisible():
+            self.event_lower_section.setVisible(False)
             self.event_vertical_splitter.setSizes([740, 0])
 
         self.sample_hz_spin.setEnabled(is_auto and not any_running)
@@ -1960,7 +1961,10 @@ class MainWindow(QMainWindow):
         self._color_analysis_busy = bool(running)
         self._update_analysis_controls()
 
-    def _invalidate_event_results(self) -> None:
+    def _invalidate_event_results(self, force: bool = False) -> None:
+        if self.detection_mode == DETECTION_MODE_MANUAL and not force:
+            self._update_analysis_controls()
+            return
         self.last_detected_events = []
         self.timeline_dirty = False
         self.event_progress.setValue(0)
@@ -2389,13 +2393,46 @@ class MainWindow(QMainWindow):
         self.detect_thread = None
         self._update_analysis_controls()
 
+    def _validate_manual_events_for_save(self) -> Optional[str]:
+        if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
+            return "Manuel kayit icin tum event satirlari olusmamis."
+
+        for row, event_info in enumerate(EVENT_DEFINITIONS):
+            event_payload = self.last_detected_events[row] if row < len(self.last_detected_events) else {}
+            event_id = int(event_payload.get("id", event_info["id"]))
+            raw_start = event_payload.get("start")
+            raw_end = event_payload.get("end")
+
+            if raw_start is None or raw_end is None:
+                return f"Event {event_id} icin start/end bos birakilamaz."
+
+            try:
+                start_seconds = float(raw_start)
+                end_seconds = float(raw_end)
+            except (TypeError, ValueError):
+                return f"Event {event_id} zaman bilgisi gecersiz."
+
+            if end_seconds < start_seconds:
+                return f"Event {event_id} icin start zamani end zamanindan buyuk olamaz."
+
+        return None
+
     def save_timeline_json(self) -> None:
         if not self.last_detected_events:
-            QMessageBox.information(self, "timeline.json", "Once olay tespiti calistirin.")
+            if self.detection_mode == DETECTION_MODE_MANUAL:
+                QMessageBox.information(self, "timeline.json", "Once manuel event zamanlarini atayin.")
+            else:
+                QMessageBox.information(self, "timeline.json", "Once olay tespiti calistirin.")
             return
         if self.video_meta is None:
             QMessageBox.warning(self, "timeline.json", "Aktif video bilgisi yok.")
             return
+
+        if self.detection_mode == DETECTION_MODE_MANUAL:
+            validation_error = self._validate_manual_events_for_save()
+            if validation_error is not None:
+                QMessageBox.warning(self, "timeline.json", validation_error)
+                return
 
         initial_dir = os.path.dirname(self.current_template_path) if self.current_template_path else os.getcwd()
         initial_path = os.path.join(initial_dir, "timeline.json")
@@ -2430,6 +2467,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "timeline.json", f"Kayit basarisiz:\n{exc}")
             return
 
+        self.timeline_dirty = False
+        self._update_analysis_controls()
         self._append_event_log(f"timeline kaydedildi: {save_path}")
         self.statusBar().showMessage(f"timeline kaydedildi: {save_path}", 4000)
 
