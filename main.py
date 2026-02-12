@@ -1523,6 +1523,11 @@ class MainWindow(QMainWindow):
         upper_layout.addLayout(top_row_layout)
         upper_layout.addWidget(self.manual_controls_box)
         upper_layout.addWidget(self.event_table, stretch=1)
+        event_table_actions_layout = QHBoxLayout()
+        event_table_actions_layout.setContentsMargins(0, 0, 0, 0)
+        event_table_actions_layout.addStretch(1)
+        event_table_actions_layout.addWidget(self.save_timeline_button)
+        upper_layout.addLayout(event_table_actions_layout)
 
         self.event_lower_section = QWidget(right_panel)
         lower_layout = QVBoxLayout(self.event_lower_section)
@@ -1556,7 +1561,6 @@ class MainWindow(QMainWindow):
         bottom_actions_layout.setContentsMargins(0, 0, 0, 0)
         bottom_actions_layout.addWidget(self.load_timeline_button)
         bottom_actions_layout.addStretch(1)
-        bottom_actions_layout.addWidget(self.save_timeline_button)
         root_layout.addLayout(bottom_actions_layout)
 
         self._reset_event_table()
