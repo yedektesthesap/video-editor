@@ -1721,6 +1721,7 @@ class MainWindow(QMainWindow):
         self.edit_progress = QProgressBar()
         self.edit_progress.setRange(0, 100)
         self.edit_progress.setValue(0)
+        self.edit_progress.setVisible(False)
         bottom_layout.addWidget(self.edit_progress)
 
         self.edit_log = QPlainTextEdit()
@@ -2072,6 +2073,8 @@ class MainWindow(QMainWindow):
         self._update_edit_controls()
 
     def on_edit_run_button_clicked(self) -> None:
+        if hasattr(self, "edit_progress") and not self.edit_progress.isVisible():
+            self.edit_progress.setVisible(True)
         if self._is_video_edit_running():
             self.stop_video_edit()
             return
