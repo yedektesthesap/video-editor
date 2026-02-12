@@ -1500,10 +1500,7 @@ class MainWindow(QMainWindow):
         assign_layout = QHBoxLayout()
         self.manual_assign_hint_label = QLabel("Atamak icin tabloda Start/End hucrelerine tiklayin.")
         self.manual_assign_hint_label.setStyleSheet("color: #9aa4b7;")
-        self.manual_clear_row_button = QPushButton("Satiri Temizle")
-        self.manual_clear_row_button.clicked.connect(self.on_manual_clear_row_clicked)
         assign_layout.addWidget(self.manual_assign_hint_label, stretch=1)
-        assign_layout.addWidget(self.manual_clear_row_button)
 
         manual_layout.addLayout(nav_layout)
         manual_layout.addWidget(self.manual_frame_slider)
@@ -1832,25 +1829,6 @@ class MainWindow(QMainWindow):
         event_id = payload.get("id", row + 1)
         self.statusBar().showMessage(f"Event {event_id} {field_name} atandi: {format_time_dk_sn_ms(seconds)}", 2600)
 
-    def on_manual_clear_row_clicked(self) -> None:
-        if self.detection_mode != DETECTION_MODE_MANUAL:
-            return
-        row = self._manual_selected_row()
-        if row is None:
-            QMessageBox.information(self, "Manuel Olay", "Temizlemek icin bir event satiri secin.")
-            return
-
-        payload = dict(self.last_detected_events[row])
-        payload["start"] = None
-        payload["end"] = None
-        payload["confidence"] = None
-        self.last_detected_events[row] = payload
-        self.timeline_dirty = True
-        self._populate_event_table_from_results()
-        self.event_table.selectRow(row)
-        event_id = payload.get("id", row + 1)
-        self.statusBar().showMessage(f"Event {event_id} zamanlari temizlendi.", 2300)
-
     def switch_to_roi_tab(self) -> None:
         self._set_current_screen("roi", push_history=True)
 
@@ -2058,14 +2036,12 @@ class MainWindow(QMainWindow):
             self.event_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
 
         manual_video_ready = is_manual and self.video_meta is not None
-        manual_row_selected = self._manual_selected_row() is not None
         manual_controls_enabled = manual_video_ready and not any_running
         self.manual_frame_slider.setEnabled(manual_controls_enabled)
         self.manual_step_minus_sec_button.setEnabled(manual_controls_enabled)
         self.manual_step_minus_frame_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_frame_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_sec_button.setEnabled(manual_controls_enabled)
-        self.manual_clear_row_button.setEnabled(manual_controls_enabled and manual_row_selected)
 
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
 
