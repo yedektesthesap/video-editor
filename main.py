@@ -1458,6 +1458,9 @@ class MainWindow(QMainWindow):
         top_row_layout.addLayout(top_left_layout, stretch=3)
         top_row_layout.addWidget(self.event_log, stretch=2)
 
+        self.event_auto_controls_widget = QWidget(right_panel)
+        self.event_auto_controls_widget.setLayout(top_row_layout)
+
         self.event_table = QTableWidget(len(EVENT_DEFINITIONS), 7)
         self.event_table.setHorizontalHeaderLabels(
             ["id", "name", "target_roi", "type", "start", "end", "confidence"]
@@ -1555,7 +1558,7 @@ class MainWindow(QMainWindow):
         upper_section = QWidget(right_panel)
         upper_layout = QVBoxLayout(upper_section)
         upper_layout.setContentsMargins(0, 0, 0, 0)
-        upper_layout.addLayout(top_row_layout)
+        upper_layout.addWidget(self.event_auto_controls_widget)
         upper_layout.addWidget(self.manual_controls_box)
         upper_layout.addWidget(self.event_table_frame)
         event_table_actions_layout = QHBoxLayout()
@@ -2439,6 +2442,7 @@ class MainWindow(QMainWindow):
         self.sample_hz_spin.setVisible(is_auto)
         self.source_sensitivity_label.setVisible(is_auto)
         self.source_sensitivity_combo.setVisible(is_auto)
+        self.event_auto_controls_widget.setVisible(is_auto)
         self.detect_button.setVisible(is_auto)
         self.event_progress.setVisible(is_auto)
         self.event_log.setVisible(is_auto)
