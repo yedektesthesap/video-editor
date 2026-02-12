@@ -1999,10 +1999,14 @@ class MainWindow(QMainWindow):
         self.manual_controls_box.setVisible(is_manual)
         if is_auto and not self.event_lower_section.isVisible():
             self.event_lower_section.setVisible(True)
+            self.event_vertical_splitter.setHandleWidth(8)
             self.event_vertical_splitter.setSizes([420, 320])
         elif is_manual and self.event_lower_section.isVisible():
             self.event_lower_section.setVisible(False)
+            self.event_vertical_splitter.setHandleWidth(0)
             self.event_vertical_splitter.setSizes([740, 0])
+        elif is_manual:
+            self.event_vertical_splitter.setHandleWidth(0)
 
         self.sample_hz_spin.setEnabled(is_auto and not any_running)
         self.source_sensitivity_combo.setEnabled(is_auto and not any_running)
