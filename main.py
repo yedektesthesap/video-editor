@@ -57,6 +57,27 @@ SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
 
+SOURCE_START_SENSITIVITY_PRESETS: dict[str, dict[str, float]] = {
+    "Hassas": {
+        "source_color_k": 3.0,
+        "source_color_min": 1.4,
+        "source_consecutive": 1.0,
+        "source_soft_ratio": 0.7,
+    },
+    "Dengeli": {
+        "source_color_k": 4.0,
+        "source_color_min": 1.8,
+        "source_consecutive": 2.0,
+        "source_soft_ratio": 0.8,
+    },
+    "Muhafazakar": {
+        "source_color_k": 5.0,
+        "source_color_min": 2.3,
+        "source_consecutive": 3.0,
+        "source_soft_ratio": 0.9,
+    },
+}
+
 DARK_STYLESHEET = """
 QWidget {
     background-color: #15171c;
@@ -1213,6 +1234,11 @@ class MainWindow(QMainWindow):
         self.sample_hz_spin.setRange(5, 12)
         self.sample_hz_spin.setValue(10)
         self.sample_hz_spin.setPrefix("sample_hz: ")
+        self.source_sensitivity_label = QLabel("Ilk4 start hass.:")
+        self.source_sensitivity_combo = QComboBox()
+        self.source_sensitivity_combo.addItems(list(SOURCE_START_SENSITIVITY_PRESETS.keys()))
+        self.source_sensitivity_combo.setCurrentText("Dengeli")
+        self.source_sensitivity_combo.setToolTip("Ilk 4 olayin start zamani icin kaynak ROI renk degisim hassasiyeti.")
 
         self.detect_button = QPushButton("Olaylari Tespit Et")
         self.detect_button.clicked.connect(self.on_detect_button_clicked)
@@ -1228,6 +1254,8 @@ class MainWindow(QMainWindow):
         self.color_analyze_button.clicked.connect(self.on_color_analyze_button_clicked)
 
         controls_layout.addWidget(self.sample_hz_spin)
+        controls_layout.addWidget(self.source_sensitivity_label)
+        controls_layout.addWidget(self.source_sensitivity_combo)
         controls_layout.addWidget(self.detect_button)
         controls_layout.addWidget(self.save_timeline_button)
         controls_layout.addStretch(1)
@@ -1399,6 +1427,7 @@ class MainWindow(QMainWindow):
         any_running = event_running or color_running
 
         self.sample_hz_spin.setEnabled(not any_running)
+        self.source_sensitivity_combo.setEnabled(not any_running)
 
         if event_running:
             if self._event_detection_cancel_requested:
@@ -1513,6 +1542,21 @@ class MainWindow(QMainWindow):
     def _rois_to_serializable(self) -> dict:
         return {name: rect.to_dict() for name, rect in self.rois_rel.items()}
 
+    def _build_event_detection_params(self) -> dict[str, object]:
+        preset_name = self.source_sensitivity_combo.currentText().strip()
+        if preset_name not in SOURCE_START_SENSITIVITY_PRESETS:
+            preset_name = "Dengeli"
+        preset = SOURCE_START_SENSITIVITY_PRESETS[preset_name]
+
+        params: dict[str, object] = {
+            "source_start_first4_enabled": True,
+            "source_color_k": float(preset["source_color_k"]),
+            "source_color_min": float(preset["source_color_min"]),
+            "source_consecutive": int(round(float(preset["source_consecutive"]))),
+            "source_soft_ratio": float(preset["source_soft_ratio"]),
+        }
+        return params
+
     def on_detect_button_clicked(self) -> None:
         if self._is_event_detection_running():
             self.stop_event_detection()
@@ -1581,13 +1625,16 @@ class MainWindow(QMainWindow):
         self.event_log.clear()
         self.event_progress.setValue(0)
         self._set_detection_controls(running=True)
-        self._append_event_log("Analiz basladi...")
+        self._append_event_log(
+            f"Analiz basladi... (Ilk4 start hass.: {self.source_sensitivity_combo.currentText().strip() or 'Dengeli'})"
+        )
 
         self.detect_thread = QThread(self)
         self.detect_worker = EventDetectionWorker(
             video_path=self.video_meta.source_video,
             rois_relative=self._rois_to_serializable(),
             sample_hz=self.last_detection_sample_hz,
+            params=self._build_event_detection_params(),
         )
         self.detect_worker.moveToThread(self.detect_thread)
 

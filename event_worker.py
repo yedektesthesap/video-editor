@@ -18,7 +18,7 @@ class EventDetectionWorker(QObject):
         video_path: str,
         rois_relative: Mapping[str, Any],
         sample_hz: int = 10,
-        params: Optional[Mapping[str, float]] = None,
+        params: Optional[Mapping[str, Any]] = None,
     ) -> None:
         super().__init__()
         self.video_path = video_path
