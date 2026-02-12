@@ -1433,7 +1433,6 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.source_sensitivity_label)
         controls_layout.addWidget(self.source_sensitivity_combo)
         controls_layout.addWidget(self.detect_button)
-        controls_layout.addWidget(self.save_timeline_button)
         controls_layout.addStretch(1)
 
         self.event_progress = QProgressBar()
@@ -1562,6 +1561,12 @@ class MainWindow(QMainWindow):
         left_initial = max(220, self.event_frame_preview.minimumWidth())
         self.event_splitter.setSizes([left_initial, 1800])
         root_layout.addWidget(self.event_splitter)
+
+        bottom_actions_layout = QHBoxLayout()
+        bottom_actions_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_actions_layout.addStretch(1)
+        bottom_actions_layout.addWidget(self.save_timeline_button)
+        root_layout.addLayout(bottom_actions_layout)
 
         self._reset_event_table()
         self._refresh_color_roi_combo()
