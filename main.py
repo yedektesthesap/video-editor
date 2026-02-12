@@ -2001,6 +2001,7 @@ class MainWindow(QMainWindow):
         self.source_sensitivity_label.setVisible(is_auto)
         self.source_sensitivity_combo.setVisible(is_auto)
         self.detect_button.setVisible(is_auto)
+        self.event_progress.setVisible(is_auto)
         self.event_log.setVisible(is_auto)
         self.manual_controls_box.setVisible(is_manual)
         if is_auto and not self.event_lower_section.isVisible():
