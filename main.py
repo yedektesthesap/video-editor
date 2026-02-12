@@ -1104,7 +1104,9 @@ class MainWindow(QMainWindow):
         self.detection_mode: Optional[str] = None
         self.timeline_dirty = False
         self.startup_tab: Optional[QWidget] = None
+        self.video_select_tab: Optional[QWidget] = None
         self.startup_completed = False
+        self._next_screen_after_video = "roi"
         self._screen_history: list[str] = []
         self._current_screen = "startup"
 
@@ -1149,6 +1151,10 @@ class MainWindow(QMainWindow):
         self._build_startup_tab(self.startup_tab)
         self.main_stack.addWidget(self.startup_tab)
 
+        self.video_select_tab = QWidget(self)
+        self._build_video_select_tab(self.video_select_tab)
+        self.main_stack.addWidget(self.video_select_tab)
+
         self.roi_tab = QWidget(self)
         self._build_roi_tab(self.roi_tab)
         self.main_stack.addWidget(self.roi_tab)
@@ -1162,6 +1168,8 @@ class MainWindow(QMainWindow):
     def _screen_title(self, screen: str) -> str:
         if screen == "startup":
             return "Baslangic"
+        if screen == "video":
+            return "Video Secimi"
         if screen == "roi":
             return "ROI Secimi"
         if screen == "event":
@@ -1171,6 +1179,8 @@ class MainWindow(QMainWindow):
     def _screen_widget(self, screen: str) -> Optional[QWidget]:
         if screen == "startup":
             return self.startup_tab
+        if screen == "video":
+            return self.video_select_tab
         if screen == "roi":
             return self.roi_tab
         if screen == "event":
@@ -1250,6 +1260,65 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(center_row)
         layout.addStretch(2)
+
+    def _build_video_select_tab(self, container: QWidget) -> None:
+        layout = QVBoxLayout(container)
+        layout.addStretch(1)
+
+        title = QLabel("Video Secimi")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 22px; font-weight: 700;")
+
+        subtitle = QLabel("Devam etmeden once bir video secin.")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("color: #b8c0cc;")
+
+        self.video_mode_info_label = QLabel("Secilen mod: -")
+        self.video_mode_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_mode_info_label.setStyleSheet("color: #d3d9e5;")
+
+        self.video_path_info_label = QLabel("Secili video: -")
+        self.video_path_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_path_info_label.setStyleSheet("color: #9aa4b7;")
+        self.video_path_info_label.setWordWrap(True)
+
+        self.video_select_continue_button = QPushButton("Video Sec ve Devam Et")
+        self.video_select_continue_button.setMinimumHeight(46)
+        self.video_select_continue_button.clicked.connect(self.on_video_select_screen_pick_clicked)
+
+        wrapper = QWidget(container)
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(8)
+        wrapper_layout.addWidget(title)
+        wrapper_layout.addWidget(subtitle)
+        wrapper_layout.addWidget(self.video_mode_info_label)
+        wrapper_layout.addWidget(self.video_path_info_label)
+        wrapper_layout.addWidget(self.video_select_continue_button)
+        wrapper.setMaximumWidth(520)
+
+        center_row = QHBoxLayout()
+        center_row.addStretch(1)
+        center_row.addWidget(wrapper)
+        center_row.addStretch(1)
+
+        layout.addLayout(center_row)
+        layout.addStretch(2)
+        self._update_video_select_screen_text()
+
+    def _update_video_select_screen_text(self) -> None:
+        mode_text = "-"
+        if self.detection_mode == DETECTION_MODE_AUTO:
+            mode_text = "Otomatik Olay Tespiti"
+        elif self.detection_mode == DETECTION_MODE_MANUAL:
+            mode_text = "Manuel Olay Tespiti"
+        self.video_mode_info_label.setText(f"Secilen mod: {mode_text}")
+
+        if self.video_meta is None:
+            self.video_path_info_label.setText("Secili video: -")
+        else:
+            base_name = os.path.basename(self.video_meta.source_video)
+            self.video_path_info_label.setText(f"Secili video: {base_name}")
 
     def _build_roi_tab(self, container: QWidget) -> None:
         main_layout = QHBoxLayout(container)
@@ -1513,20 +1582,38 @@ class MainWindow(QMainWindow):
             self.shortcuts.append(shortcut)
 
     def on_startup_auto_clicked(self) -> None:
-        if not self._apply_detection_mode(DETECTION_MODE_AUTO, source="startup"):
+        if not self._apply_detection_mode(
+            DETECTION_MODE_AUTO,
+            source="startup",
+            require_video_if_manual=False,
+        ):
             return
-        self._complete_startup_selection(open_event_tab=False)
+        self._begin_video_selection_flow(target_screen="roi")
 
     def on_startup_manual_clicked(self) -> None:
-        if not self._apply_detection_mode(DETECTION_MODE_MANUAL, source="startup"):
+        if not self._apply_detection_mode(
+            DETECTION_MODE_MANUAL,
+            source="startup",
+            require_video_if_manual=False,
+        ):
             return
-        self._complete_startup_selection(open_event_tab=True)
+        self._begin_video_selection_flow(target_screen="event")
 
-    def _complete_startup_selection(self, open_event_tab: bool) -> None:
+    def _begin_video_selection_flow(self, target_screen: str) -> None:
+        if target_screen not in ("roi", "event"):
+            target_screen = "roi"
+
         self.startup_completed = True
+        self._next_screen_after_video = target_screen
+        self._update_video_select_screen_text()
         self._update_analysis_controls()
+        self._set_current_screen("video", push_history=True)
 
-        if open_event_tab:
+    def on_video_select_screen_pick_clicked(self) -> None:
+        if not self.open_video_dialog():
+            return
+
+        if self._next_screen_after_video == "event":
             self.switch_to_event_tab()
         else:
             self.switch_to_roi_tab()
@@ -1594,11 +1681,17 @@ class MainWindow(QMainWindow):
         self.timeline_dirty = False
         self._populate_event_table_from_results()
 
-    def _apply_detection_mode(self, mode: Optional[str], source: str) -> bool:
+    def _apply_detection_mode(
+        self,
+        mode: Optional[str],
+        source: str,
+        require_video_if_manual: bool = True,
+    ) -> bool:
         if mode not in (DETECTION_MODE_AUTO, DETECTION_MODE_MANUAL, None):
             return False
         if mode == self.detection_mode:
             self._sync_event_mode_combo_to_state()
+            self._update_video_select_screen_text()
             self._update_analysis_controls()
             return True
 
@@ -1611,7 +1704,7 @@ class MainWindow(QMainWindow):
             self._sync_event_mode_combo_to_state()
             return False
 
-        if mode == DETECTION_MODE_MANUAL and not self._has_usable_video():
+        if mode == DETECTION_MODE_MANUAL and require_video_if_manual and not self._has_usable_video():
             if not self.open_video_dialog():
                 if source == "startup":
                     self.statusBar().showMessage("Manuel mod icin video secimi gerekli.", 2600)
@@ -1627,6 +1720,7 @@ class MainWindow(QMainWindow):
             self.timeline_dirty = False
 
         self._sync_event_mode_combo_to_state()
+        self._update_video_select_screen_text()
         self._update_analysis_controls()
         return True
 
@@ -2701,9 +2795,9 @@ class MainWindow(QMainWindow):
         self._update_event_video_label()
         if self.detection_mode == DETECTION_MODE_MANUAL:
             self._initialize_manual_events()
-            self.switch_to_event_tab()
         else:
             self._invalidate_event_results()
+        self._update_video_select_screen_text()
         self._invalidate_roi_color_results(refresh_combo=True)
         self.statusBar().showMessage(f"Video loaded: {os.path.basename(path)}", 3000)
         return True
