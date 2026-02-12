@@ -1488,7 +1488,8 @@ class MainWindow(QMainWindow):
             ["id", "name", "target_roi", "type", "start", "end", "confidence"]
         )
         self.event_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.event_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.event_table.verticalHeader().setVisible(False)
         self.event_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         header = self.event_table.horizontalHeader()
@@ -1555,9 +1556,15 @@ class MainWindow(QMainWindow):
         step_layout.addStretch(1)
 
         assign_layout = QHBoxLayout()
-        self.manual_assign_hint_label = QLabel("Atamak icin tabloda Start/End hucrelerine tiklayin.")
+        self.manual_assign_hint_label = QLabel("Satir secin, sonra Set Start / Set End ile atayin.")
         self.manual_assign_hint_label.setStyleSheet("color: #9aa4b7;")
         assign_layout.addWidget(self.manual_assign_hint_label, stretch=1)
+        self.manual_set_start_button = QPushButton("Set Start")
+        self.manual_set_end_button = QPushButton("Set End")
+        self.manual_set_start_button.clicked.connect(self.on_manual_set_start_clicked)
+        self.manual_set_end_button.clicked.connect(self.on_manual_set_end_clicked)
+        assign_layout.addWidget(self.manual_set_start_button)
+        assign_layout.addWidget(self.manual_set_end_button)
 
         manual_layout.addLayout(nav_layout)
         manual_layout.addWidget(self.manual_frame_slider)
@@ -2041,6 +2048,12 @@ class MainWindow(QMainWindow):
         if frame_delta == 0 and delta_seconds != 0.0:
             frame_delta = 1 if delta_seconds > 0 else -1
         self.step_manual_frame(frame_delta)
+
+    def on_manual_set_start_clicked(self) -> None:
+        self._assign_manual_event_time("start")
+
+    def on_manual_set_end_clicked(self) -> None:
+        self._assign_manual_event_time("end")
 
     def _assign_manual_event_time(self, field_name: str, row_override: Optional[int] = None) -> None:
         if self.detection_mode != DETECTION_MODE_MANUAL:
@@ -2861,10 +2874,7 @@ class MainWindow(QMainWindow):
             item.setToolTip("Bu olay icin zaman bilgisi yok.")
         else:
             item.setForeground(QColor("#7ec8ff"))
-            if self.detection_mode == DETECTION_MODE_MANUAL:
-                item.setToolTip("Tikla: o anki sureyi bu hucreye ata.")
-            else:
-                item.setToolTip("Tikla: ilgili frame'i goster.")
+            item.setToolTip("Tikla: ilgili frame'i goster.")
         self.event_table.setItem(row, col, item)
 
     def _reset_event_table(self) -> None:
@@ -3057,16 +3067,9 @@ class MainWindow(QMainWindow):
             self.color_analyze_button.setText("ROI Renk Analizi")
             self.color_analyze_button.setEnabled(False)
 
-        if is_manual:
-            self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-            self.event_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        else:
-            self.event_table.clearSelection()
-            self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-            self.event_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-
         manual_video_ready = is_manual and self.video_meta is not None
         manual_controls_enabled = manual_video_ready and not any_running
+        manual_row_selected = self._manual_selected_row() is not None
         self.manual_frame_slider.setEnabled(manual_controls_enabled)
         self.manual_step_minus_sec_button.setEnabled(manual_controls_enabled)
         self.manual_step_minus_500ms_button.setEnabled(manual_controls_enabled)
@@ -3078,6 +3081,8 @@ class MainWindow(QMainWindow):
         self.manual_step_plus_250ms_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_500ms_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_sec_button.setEnabled(manual_controls_enabled)
+        self.manual_set_start_button.setEnabled(manual_controls_enabled and manual_row_selected)
+        self.manual_set_end_button.setEnabled(manual_controls_enabled and manual_row_selected)
 
         self.load_timeline_button.setEnabled(mode_ready and (not any_running))
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
@@ -3425,11 +3430,6 @@ class MainWindow(QMainWindow):
         if col not in (EVENT_COL_START, EVENT_COL_END):
             return
         if row < 0 or row >= len(self.last_detected_events):
-            return
-
-        if self.detection_mode == DETECTION_MODE_MANUAL:
-            field_name = "start" if col == EVENT_COL_START else "end"
-            self._assign_manual_event_time(field_name, row_override=row)
             return
 
         if self.video_meta is None:
