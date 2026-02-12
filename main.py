@@ -1668,26 +1668,32 @@ class MainWindow(QMainWindow):
         cut_layout.addLayout(quality_layout)
         top_layout.addWidget(self.edit_cut_group)
 
+        bottom_content = QWidget(container)
+        bottom_layout = QVBoxLayout(bottom_content)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(8)
+
         run_layout = QHBoxLayout()
         run_layout.setContentsMargins(0, 0, 0, 0)
         run_layout.addStretch(1)
         self.edit_run_button = QPushButton("Edit Islemine Basla")
         self.edit_run_button.clicked.connect(self.on_edit_run_button_clicked)
         run_layout.addWidget(self.edit_run_button)
-        top_layout.addLayout(run_layout)
+        bottom_layout.addLayout(run_layout)
 
         self.edit_progress = QProgressBar()
         self.edit_progress.setRange(0, 100)
         self.edit_progress.setValue(0)
-        top_layout.addWidget(self.edit_progress)
+        bottom_layout.addWidget(self.edit_progress)
 
         self.edit_log = QPlainTextEdit()
         self.edit_log.setReadOnly(True)
         self.edit_log.setPlaceholderText("FFmpeg edit loglari burada gorunecek.")
         self.edit_log.setMaximumBlockCount(400)
+        bottom_layout.addWidget(self.edit_log, stretch=1)
 
-        root_layout.addWidget(top_content, stretch=3)
-        root_layout.addWidget(self.edit_log, stretch=1)
+        root_layout.addWidget(top_content, stretch=3, alignment=Qt.AlignmentFlag.AlignTop)
+        root_layout.addWidget(bottom_content, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
         self._update_edit_controls()
 
     def _setup_shortcuts(self) -> None:
