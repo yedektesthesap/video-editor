@@ -1137,10 +1137,15 @@ class MainWindow(QMainWindow):
 
         self.screen_title_label = QLabel("Video Secimi")
         self.screen_title_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #f4f5f7;")
+        self.screen_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.nav_right_spacer = QWidget(self)
+        self.nav_right_spacer.setFixedWidth(90)
 
         nav_layout.addWidget(self.back_button)
+        nav_layout.addStretch(1)
         nav_layout.addWidget(self.screen_title_label)
         nav_layout.addStretch(1)
+        nav_layout.addWidget(self.nav_right_spacer)
         root_layout.addWidget(nav_bar)
 
         self.main_stack = QStackedWidget(self)
@@ -1208,8 +1213,10 @@ class MainWindow(QMainWindow):
 
     def _update_navigation_bar(self) -> None:
         hide_back_button = self._current_screen == "video"
-        self.back_button.setVisible(not hide_back_button)
-        self.back_button.setEnabled((not hide_back_button) and bool(self._screen_history))
+        back_visible = not hide_back_button
+        self.back_button.setVisible(back_visible)
+        self.back_button.setEnabled(back_visible and bool(self._screen_history))
+        self.nav_right_spacer.setVisible(back_visible)
         self.screen_title_label.setText(self._screen_title(self._current_screen))
 
     def on_back_button_clicked(self) -> None:
