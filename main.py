@@ -1226,10 +1226,6 @@ class MainWindow(QMainWindow):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 22px; font-weight: 700;")
 
-        subtitle = QLabel("Devam etmeden once bir calisma modu secin.")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("color: #b8c0cc;")
-
         auto_button = QPushButton("Otomatik Olay Tespiti")
         auto_button.setMinimumHeight(46)
         auto_button.clicked.connect(self.on_startup_auto_clicked)
@@ -1250,7 +1246,6 @@ class MainWindow(QMainWindow):
         wrapper_layout.setContentsMargins(0, 0, 0, 0)
         wrapper_layout.setSpacing(8)
         wrapper_layout.addWidget(title)
-        wrapper_layout.addWidget(subtitle)
         wrapper_layout.addWidget(button_box)
         wrapper.setMaximumWidth(460)
 
