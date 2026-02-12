@@ -1471,7 +1471,7 @@ class MainWindow(QMainWindow):
         self.event_table.cellClicked.connect(self.on_event_table_cell_clicked)
         self.event_table.itemSelectionChanged.connect(self.on_event_table_selection_changed)
 
-        self.event_table_frame = QFrame(upper_section)
+        self.event_table_frame = QFrame(right_panel)
         self.event_table_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.event_table_frame.setFrameShadow(QFrame.Shadow.Plain)
         event_table_frame_layout = QVBoxLayout(self.event_table_frame)
