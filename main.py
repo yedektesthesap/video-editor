@@ -1399,6 +1399,8 @@ class MainWindow(QMainWindow):
         self.save_timeline_button = QPushButton("timeline.json Kaydet")
         self.save_timeline_button.setEnabled(False)
         self.save_timeline_button.clicked.connect(self.save_timeline_json)
+        self.load_timeline_button = QPushButton("timeline.json Yukle")
+        self.load_timeline_button.clicked.connect(self.load_timeline_json)
 
         self.color_roi_label = QLabel("Renk ROI:")
         self.color_roi_combo = QComboBox()
@@ -1552,6 +1554,7 @@ class MainWindow(QMainWindow):
 
         bottom_actions_layout = QHBoxLayout()
         bottom_actions_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_actions_layout.addWidget(self.load_timeline_button)
         bottom_actions_layout.addStretch(1)
         bottom_actions_layout.addWidget(self.save_timeline_button)
         root_layout.addLayout(bottom_actions_layout)
@@ -2044,6 +2047,7 @@ class MainWindow(QMainWindow):
         self.manual_step_plus_500ms_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_sec_button.setEnabled(manual_controls_enabled)
 
+        self.load_timeline_button.setEnabled(mode_ready and (not any_running))
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
 
     def _set_detection_controls(self, running: bool) -> None:
@@ -2515,6 +2519,125 @@ class MainWindow(QMainWindow):
                 return f"Event {event_id} icin start zamani end zamanindan buyuk olamaz."
 
         return None
+
+    def _build_events_from_timeline_payload(self, payload: object) -> Tuple[Optional[list[dict]], Optional[str]]:
+        if not isinstance(payload, dict):
+            return None, "Dosya formati gecersiz."
+
+        raw_events = payload.get("events")
+        if not isinstance(raw_events, list):
+            return None, "'events' listesi bulunamadi."
+
+        events_by_id: Dict[int, dict] = {}
+        for raw_event in raw_events:
+            if not isinstance(raw_event, dict):
+                continue
+            raw_id = raw_event.get("id")
+            try:
+                event_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            events_by_id[event_id] = raw_event
+
+        normalized_events: list[dict] = []
+        for row, event_info in enumerate(EVENT_DEFINITIONS):
+            event_id = int(event_info["id"])
+            source_event = events_by_id.get(event_id)
+            if source_event is None and row < len(raw_events) and isinstance(raw_events[row], dict):
+                source_event = raw_events[row]
+
+            start_seconds: Optional[float] = None
+            end_seconds: Optional[float] = None
+            confidence_value: Optional[float] = None
+            if source_event is not None:
+                raw_start = source_event.get("start")
+                raw_end = source_event.get("end")
+
+                if raw_start is not None:
+                    try:
+                        start_seconds = round(float(raw_start), 2)
+                    except (TypeError, ValueError):
+                        return None, f"Event {event_id} start degeri gecersiz."
+
+                if raw_end is not None:
+                    try:
+                        end_seconds = round(float(raw_end), 2)
+                    except (TypeError, ValueError):
+                        return None, f"Event {event_id} end degeri gecersiz."
+
+                raw_confidence = source_event.get("confidence")
+                if raw_confidence is not None:
+                    try:
+                        confidence_value = float(raw_confidence)
+                    except (TypeError, ValueError):
+                        confidence_value = None
+
+            normalized_events.append(
+                {
+                    "id": event_id,
+                    "name": str(event_info["name"]),
+                    "target_roi": str(event_info["target_roi"]),
+                    "type": str(event_info["type"]),
+                    "start": start_seconds,
+                    "end": end_seconds,
+                    "confidence": confidence_value,
+                }
+            )
+
+        return normalized_events, None
+
+    def load_timeline_json(self) -> None:
+        if self._is_event_detection_running() or self._is_color_analysis_running():
+            QMessageBox.information(self, "timeline.json", "Analiz calisirken timeline yuklenemez.")
+            return
+
+        initial_dir = os.getcwd()
+        if self.video_meta is not None:
+            video_dir = os.path.dirname(self.video_meta.source_video)
+            if os.path.isdir(video_dir):
+                initial_dir = video_dir
+        elif self.current_template_path:
+            template_dir = os.path.dirname(self.current_template_path)
+            if os.path.isdir(template_dir):
+                initial_dir = template_dir
+
+        load_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "timeline.json Yukle",
+            initial_dir,
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+        if not load_path:
+            return
+
+        try:
+            with open(load_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.warning(self, "timeline.json", f"Dosya okunamadi:\n{exc}")
+            return
+
+        parsed_events, parse_error = self._build_events_from_timeline_payload(payload)
+        if parse_error is not None or parsed_events is None:
+            QMessageBox.warning(self, "timeline.json", parse_error or "timeline verisi gecersiz.")
+            return
+
+        if isinstance(payload, dict):
+            raw_sample_hz = payload.get("sample_hz")
+            try:
+                sample_hz = int(raw_sample_hz)
+            except (TypeError, ValueError):
+                sample_hz = None
+            if sample_hz is not None:
+                sample_hz = max(self.sample_hz_spin.minimum(), min(self.sample_hz_spin.maximum(), sample_hz))
+                self.last_detection_sample_hz = int(sample_hz)
+                self.sample_hz_spin.setValue(int(sample_hz))
+
+        self.last_detected_events = parsed_events
+        self.timeline_dirty = False
+        self._populate_event_table_from_results()
+        self._append_event_log(f"timeline yuklendi: {load_path}")
+        self.statusBar().showMessage(f"timeline yuklendi: {os.path.basename(load_path)}", 4000)
 
     def save_timeline_json(self) -> None:
         if not self.last_detected_events:
