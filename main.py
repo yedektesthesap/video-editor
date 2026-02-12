@@ -5,6 +5,7 @@ import colorsys
 import hashlib
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -46,7 +47,7 @@ from PyQt6.QtWidgets import (
 )
 
 from event_detector import EVENT_DEFINITIONS, REQUIRED_TARGET_ROIS
-from event_worker import EventDetectionWorker, RoiColorAnalysisWorker
+from event_worker import EventDetectionWorker, RoiColorAnalysisWorker, VideoEditWorker
 
 MAX_DISPLAY_WIDTH = 1200
 MAX_DISPLAY_HEIGHT = 1200
@@ -58,6 +59,7 @@ SETTINGS_ORGANIZATION = "YSN"
 SETTINGS_APPLICATION = "VideoEditorROI"
 SETTINGS_LAST_TEMPLATE_PATH = "last_template_path"
 SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
+SETTINGS_FFMPEG_PATH = "ffmpeg_path"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
 DETECTION_MODE_AUTO = "auto"
@@ -1095,7 +1097,7 @@ class MainWindow(QMainWindow):
         self.color_thread: Optional[QThread] = None
         self.color_worker: Optional[RoiColorAnalysisWorker] = None
         self.edit_thread: Optional[QThread] = None
-        self.edit_worker: Optional[object] = None
+        self.edit_worker: Optional[VideoEditWorker] = None
         self.last_detected_events: list[dict] = []
         self.last_roi_color_payload: Optional[dict] = None
         self.edit_segments: list[tuple[float, float]] = []
@@ -1778,7 +1780,7 @@ class MainWindow(QMainWindow):
             self._update_analysis_controls()
             return True
 
-        if self._is_event_detection_running() or self._is_color_analysis_running():
+        if self._is_event_detection_running() or self._is_color_analysis_running() or self._is_video_edit_running():
             QMessageBox.information(self, "Mod Degisimi", "Calisan analiz varken mod degistirilemez.")
             self._sync_event_mode_combo_to_state()
             return False
@@ -1988,7 +1990,10 @@ class MainWindow(QMainWindow):
         self._update_edit_controls()
 
     def on_edit_run_button_clicked(self) -> None:
-        QMessageBox.information(self, "Edit", "FFmpeg calistirma akisi bir sonraki adimda eklenecek.")
+        if self._is_video_edit_running():
+            self.stop_video_edit()
+            return
+        self.start_video_edit()
 
     def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
         if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
@@ -2069,7 +2074,7 @@ class MainWindow(QMainWindow):
     def _is_video_edit_running(self) -> bool:
         return self._video_edit_busy or (self.edit_thread is not None and self.edit_thread.isRunning())
 
-    def _update_edit_controls(self) -> None:
+    def _update_edit_controls(self, *_args: object) -> None:
         if not hasattr(self, "edit_run_button"):
             return
         is_running = self._is_video_edit_running()
@@ -2085,12 +2090,192 @@ class MainWindow(QMainWindow):
         self.edit_output_browse_button.setEnabled(not is_running)
         self.edit_preset_combo.setEnabled(not is_running)
         self.edit_crf_spin.setEnabled(not is_running)
-        self.edit_run_button.setEnabled(can_run)
-        self.edit_run_button.setText("Edit Islemine Basla" if not is_running else "Edit Islemi Durduruluyor...")
+        if is_running:
+            if self._video_edit_cancel_requested:
+                self.edit_run_button.setText("Edit Islemi Durduruluyor...")
+                self.edit_run_button.setEnabled(False)
+            else:
+                self.edit_run_button.setText("Edit Islemeyi Durdur")
+                self.edit_run_button.setEnabled(True)
+        else:
+            self.edit_run_button.setText("Edit Islemine Basla")
+            self.edit_run_button.setEnabled(can_run)
+
+    def _set_video_edit_controls(self, running: bool) -> None:
+        self._video_edit_busy = bool(running)
+        self._update_analysis_controls()
+
+    def _resolve_ffmpeg_path(self) -> Optional[str]:
+        stored_path = self.settings.value(SETTINGS_FFMPEG_PATH, "", type=str).strip()
+        if stored_path and os.path.isfile(stored_path):
+            return stored_path
+
+        path_ffmpeg = shutil.which("ffmpeg")
+        if path_ffmpeg and os.path.isfile(path_ffmpeg):
+            return path_ffmpeg
+
+        initial_dir = ""
+        if stored_path:
+            candidate_dir = os.path.dirname(stored_path)
+            if os.path.isdir(candidate_dir):
+                initial_dir = candidate_dir
+        if not initial_dir:
+            initial_dir = os.getcwd()
+
+        ffmpeg_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "ffmpeg.exe Sec",
+            initial_dir,
+            "FFmpeg Executable (ffmpeg.exe);;Executable Files (*.exe);;All Files (*.*)",
+        )
+        if not ffmpeg_path:
+            return None
+        ffmpeg_path = ffmpeg_path.strip()
+        if not ffmpeg_path or not os.path.isfile(ffmpeg_path):
+            QMessageBox.warning(self, "FFmpeg", "Secilen ffmpeg yolu gecersiz.")
+            return None
+        self.settings.setValue(SETTINGS_FFMPEG_PATH, ffmpeg_path)
+        return ffmpeg_path
+
+    def start_video_edit(self) -> None:
+        if self._is_video_edit_running():
+            QMessageBox.information(self, "Edit", "Video edit islemi zaten calisiyor.")
+            return
+        if self._is_event_detection_running() or self._is_color_analysis_running():
+            QMessageBox.information(self, "Edit", "Analiz calisirken edit baslatilamaz.")
+            return
+        if self.video_meta is None or not os.path.isfile(self.video_meta.source_video):
+            QMessageBox.warning(self, "Edit", "Aktif video bulunamadi.")
+            return
+        if not self.edit_cut_enabled_checkbox.isChecked():
+            QMessageBox.warning(self, "Edit", "Bu surumde yalnizca cut islemi destekleniyor.")
+            return
+
+        segments, error = self._build_merged_cut_segments()
+        if error is not None or segments is None:
+            QMessageBox.warning(self, "Edit", error or "Kesim segmentleri hazirlanamadi.")
+            return
+        self.edit_segments = segments
+        self._update_edit_segments_label()
+
+        output_path = self.edit_output_path_edit.text().strip()
+        if not output_path:
+            output_path = self._default_cut_output_path(self.video_meta.source_video)
+            self.edit_output_path_edit.setText(output_path)
+        output_path = output_path.strip()
+        if not output_path:
+            QMessageBox.warning(self, "Edit", "Cikti dosya yolu bos olamaz.")
+            return
+        if not output_path.lower().endswith(".mp4"):
+            output_path += ".mp4"
+            self.edit_output_path_edit.setText(output_path)
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.isdir(output_dir):
+            QMessageBox.warning(self, "Edit", "Cikti klasoru bulunamadi.")
+            return
+
+        source_path = self.video_meta.source_video
+        if os.path.abspath(source_path) == os.path.abspath(output_path):
+            QMessageBox.warning(self, "Edit", "Cikti dosyasi kaynak video ile ayni olamaz.")
+            return
+
+        if os.path.exists(output_path):
+            overwrite = QMessageBox.question(
+                self,
+                "Edit",
+                "Cikti dosyasi zaten var. Uzerine yazilsin mi?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if overwrite != QMessageBox.StandardButton.Yes:
+                return
+
+        ffmpeg_path = self._resolve_ffmpeg_path()
+        if ffmpeg_path is None:
+            QMessageBox.warning(self, "FFmpeg", "FFmpeg yolu bulunamadi. Islem baslatilmadi.")
+            return
+
+        preset = self.edit_preset_combo.currentText().strip() or "medium"
+        crf_value = int(self.edit_crf_spin.value())
+
+        self.edit_progress.setValue(0)
+        self.edit_log.clear()
+        self._append_edit_log(self._format_segments_summary(self.edit_segments))
+        self._append_edit_log(f"FFmpeg: {ffmpeg_path}")
+        self._append_edit_log(f"Cikti: {output_path}")
+        self.statusBar().showMessage("Video edit islemi baslatiliyor...", 2200)
+
+        self._video_edit_cancel_requested = False
+        self.edit_thread = QThread(self)
+        self.edit_worker = VideoEditWorker(
+            ffmpeg_path=ffmpeg_path,
+            input_path=source_path,
+            output_path=output_path,
+            cut_segments=self.edit_segments,
+            preset=preset,
+            crf=crf_value,
+            enable_cut=True,
+        )
+        self.edit_worker.moveToThread(self.edit_thread)
+
+        self.edit_thread.started.connect(self.edit_worker.run)
+        self.edit_worker.progress.connect(self.on_video_edit_progress)
+        self.edit_worker.result.connect(self.on_video_edit_result)
+        self.edit_worker.error.connect(self.on_video_edit_error)
+        self.edit_worker.finished.connect(self.on_video_edit_finished)
+        self.edit_worker.finished.connect(self.edit_thread.quit)
+        self.edit_worker.finished.connect(self.edit_worker.deleteLater)
+        self.edit_thread.finished.connect(self.edit_thread.deleteLater)
+        self.edit_thread.finished.connect(self.on_video_edit_thread_finished)
+
+        self._set_video_edit_controls(running=True)
+        self.edit_thread.start()
+
+    def stop_video_edit(self) -> None:
+        if not self._is_video_edit_running() or self.edit_worker is None:
+            self.statusBar().showMessage("Calisan video edit islemi yok.", 2200)
+            return
+        if self._video_edit_cancel_requested:
+            return
+        self._video_edit_cancel_requested = True
+        self.edit_worker.cancel()
+        self._append_edit_log("Video edit islemi icin durdurma istendi.")
+        self.statusBar().showMessage("Video edit islemi durduruluyor...", 2500)
+        self._update_edit_controls()
+
+    def on_video_edit_progress(self, percent: int, message: str) -> None:
+        self.edit_progress.setValue(max(0, min(100, int(percent))))
+        if message.strip():
+            self._append_edit_log(message)
+
+    def on_video_edit_result(self, payload: dict) -> None:
+        output_path = str(payload.get("output_path", "")).strip()
+        if output_path:
+            self._append_edit_log(f"Olusan dosya: {output_path}")
+            self.statusBar().showMessage(f"Video edit tamamlandi: {output_path}", 4000)
+        self.edit_progress.setValue(100)
+
+    def on_video_edit_error(self, message: str) -> None:
+        self._append_edit_log(f"Hata: {message}")
+        QMessageBox.critical(self, "Video Edit", message)
+
+    def on_video_edit_finished(self) -> None:
+        self._set_video_edit_controls(running=False)
+        if self._video_edit_cancel_requested:
+            self._append_edit_log("Video edit islemi kullanici tarafindan durduruldu.")
+            self.statusBar().showMessage("Video edit islemi durduruldu.", 3200)
+        elif self.edit_progress.value() < 100:
+            self.statusBar().showMessage("Video edit islemi bitti.", 3000)
+        self._video_edit_cancel_requested = False
+
+    def on_video_edit_thread_finished(self) -> None:
+        self.edit_worker = None
+        self.edit_thread = None
+        self._update_edit_controls()
 
     def _update_event_table_frame_height(self) -> None:
         row_height = max(1, int(self.event_table.verticalHeader().defaultSectionSize()))
-        header_height = max(1, int(self.event_table.horizontalHeader().height()))
+        header_height = max(24, int(self.event_table.horizontalHeader().height()))
         frame_border = max(0, int(self.event_table.frameWidth()) * 2)
         target_height = header_height + (EVENT_TABLE_VISIBLE_ROWS * row_height) + frame_border
         self.event_table_frame.setMinimumHeight(target_height)
@@ -2273,7 +2458,7 @@ class MainWindow(QMainWindow):
                 self.detect_button.setEnabled(True)
         elif is_auto:
             self.detect_button.setText("Olaylari Tespit Et")
-            self.detect_button.setEnabled(not color_running)
+            self.detect_button.setEnabled((not color_running) and (not edit_running))
         else:
             self.detect_button.setText("Olaylari Tespit Et")
             self.detect_button.setEnabled(False)
@@ -2292,7 +2477,7 @@ class MainWindow(QMainWindow):
                 self.color_analyze_button.setEnabled(True)
         elif is_auto:
             self.color_analyze_button.setText("ROI Renk Analizi")
-            self.color_analyze_button.setEnabled(can_start_color and not event_running)
+            self.color_analyze_button.setEnabled(can_start_color and (not event_running) and (not edit_running))
         else:
             self.color_analyze_button.setText("ROI Renk Analizi")
             self.color_analyze_button.setEnabled(False)
@@ -2473,6 +2658,9 @@ class MainWindow(QMainWindow):
         if self._is_event_detection_running():
             QMessageBox.information(self, "Olay Tespit", "Analiz zaten calisiyor.")
             return
+        if self._is_video_edit_running():
+            QMessageBox.information(self, "Olay Tespit", "Video edit calisirken olay tespiti baslatilamaz.")
+            return
         if self._is_color_analysis_running():
             QMessageBox.information(self, "Olay Tespit", "Renk analizi calisiyor. Once tamamlanmasini bekleyin.")
             return
@@ -2548,6 +2736,9 @@ class MainWindow(QMainWindow):
             return
         if self._is_color_analysis_running():
             QMessageBox.information(self, "ROI Renk Analizi", "Renk analizi zaten calisiyor.")
+            return
+        if self._is_video_edit_running():
+            QMessageBox.information(self, "ROI Renk Analizi", "Video edit calisirken renk analizi baslatilamaz.")
             return
         if self._is_event_detection_running():
             QMessageBox.information(self, "ROI Renk Analizi", "Olay tespiti calisiyor. Once bitmesini bekleyin.")
@@ -2865,7 +3056,7 @@ class MainWindow(QMainWindow):
         return normalized_events, None
 
     def load_timeline_json(self) -> None:
-        if self._is_event_detection_running() or self._is_color_analysis_running():
+        if self._is_event_detection_running() or self._is_color_analysis_running() or self._is_video_edit_running():
             QMessageBox.information(self, "timeline.json", "Analiz calisirken timeline yuklenemez.")
             return
 
@@ -3106,6 +3297,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Add or select an ROI before drawing.", 2600)
 
     def open_video_dialog(self) -> bool:
+        if self._is_video_edit_running():
+            QMessageBox.information(self, "Open Video", "Video edit calisirken yeni video acilamaz.")
+            return False
+
         initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
         if not initial_dir or not os.path.isdir(initial_dir):
             if self.video_meta is not None:
@@ -3477,6 +3672,11 @@ class MainWindow(QMainWindow):
         if self.color_thread is not None and self.color_thread.isRunning():
             self.color_thread.quit()
             self.color_thread.wait(1500)
+        if self.edit_worker is not None:
+            self.edit_worker.cancel()
+        if self.edit_thread is not None and self.edit_thread.isRunning():
+            self.edit_thread.quit()
+            self.edit_thread.wait(1500)
         super().closeEvent(event)
 
 
