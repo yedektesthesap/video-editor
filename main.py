@@ -1207,7 +1207,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _update_navigation_bar(self) -> None:
-        hide_back_button = self._current_screen in {"startup", "video"}
+        hide_back_button = self._current_screen == "video"
         self.back_button.setVisible(not hide_back_button)
         self.back_button.setEnabled((not hide_back_button) and bool(self._screen_history))
         self.screen_title_label.setText(self._screen_title(self._current_screen))
@@ -1604,7 +1604,7 @@ class MainWindow(QMainWindow):
     def on_video_select_screen_pick_clicked(self) -> None:
         if not self.open_video_dialog():
             return
-        self._set_current_screen("startup", push_history=False)
+        self._set_current_screen("startup", push_history=True)
 
     def _complete_startup_selection(self, open_event_tab: bool) -> None:
         self.startup_completed = True
