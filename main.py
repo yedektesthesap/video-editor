@@ -1297,6 +1297,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.event_video_label)
 
         controls_layout = QHBoxLayout()
+        self.event_mode_label = QLabel("Mod:")
+        self.event_mode_combo = QComboBox()
+        self.event_mode_combo.addItem("Otomatik", DETECTION_MODE_AUTO)
+        self.event_mode_combo.addItem("Manuel", DETECTION_MODE_MANUAL)
+        self.event_mode_combo.currentIndexChanged.connect(self.on_event_mode_combo_changed)
+
+        self.event_open_video_button = QPushButton("Video Ac")
+        self.event_open_video_button.clicked.connect(self.open_video_dialog)
+
         self.sample_hz_spin = QSpinBox()
         self.sample_hz_spin.setRange(5, 12)
         self.sample_hz_spin.setValue(10)
@@ -1320,6 +1329,9 @@ class MainWindow(QMainWindow):
         self.color_analyze_button = QPushButton("ROI Renk Analizi")
         self.color_analyze_button.clicked.connect(self.on_color_analyze_button_clicked)
 
+        controls_layout.addWidget(self.event_mode_label)
+        controls_layout.addWidget(self.event_mode_combo)
+        controls_layout.addWidget(self.event_open_video_button)
         controls_layout.addWidget(self.sample_hz_spin)
         controls_layout.addWidget(self.source_sensitivity_label)
         controls_layout.addWidget(self.source_sensitivity_combo)
@@ -1356,6 +1368,55 @@ class MainWindow(QMainWindow):
         header = self.event_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.event_table.cellClicked.connect(self.on_event_table_cell_clicked)
+        self.event_table.itemSelectionChanged.connect(self.on_event_table_selection_changed)
+
+        self.manual_controls_box = QGroupBox("Manuel Olay Atama")
+        manual_layout = QVBoxLayout(self.manual_controls_box)
+        manual_layout.setContentsMargins(8, 8, 8, 8)
+        manual_layout.setSpacing(6)
+
+        self.manual_time_label = QLabel("Frame: -")
+        self.manual_time_label.setStyleSheet("color: #9aa4b7;")
+
+        self.manual_frame_slider = QSlider(Qt.Orientation.Horizontal)
+        self.manual_frame_slider.setRange(0, 0)
+        self.manual_frame_slider.valueChanged.connect(self.on_manual_frame_slider_changed)
+
+        nav_layout = QHBoxLayout()
+        nav_layout.addWidget(QLabel("Timeline:"))
+        nav_layout.addWidget(self.manual_time_label, stretch=1)
+
+        step_layout = QHBoxLayout()
+        self.manual_step_minus_sec_button = QPushButton("-1 sn")
+        self.manual_step_minus_frame_button = QPushButton("-1 f")
+        self.manual_step_plus_frame_button = QPushButton("+1 f")
+        self.manual_step_plus_sec_button = QPushButton("+1 sn")
+        self.manual_step_minus_sec_button.clicked.connect(lambda: self.step_manual_seconds(-1.0))
+        self.manual_step_minus_frame_button.clicked.connect(lambda: self.step_manual_frame(-1))
+        self.manual_step_plus_frame_button.clicked.connect(lambda: self.step_manual_frame(1))
+        self.manual_step_plus_sec_button.clicked.connect(lambda: self.step_manual_seconds(1.0))
+        step_layout.addWidget(self.manual_step_minus_sec_button)
+        step_layout.addWidget(self.manual_step_minus_frame_button)
+        step_layout.addWidget(self.manual_step_plus_frame_button)
+        step_layout.addWidget(self.manual_step_plus_sec_button)
+        step_layout.addStretch(1)
+
+        assign_layout = QHBoxLayout()
+        self.manual_assign_start_button = QPushButton("Start Ata")
+        self.manual_assign_end_button = QPushButton("End Ata")
+        self.manual_clear_row_button = QPushButton("Satiri Temizle")
+        self.manual_assign_start_button.clicked.connect(self.on_manual_assign_start_clicked)
+        self.manual_assign_end_button.clicked.connect(self.on_manual_assign_end_clicked)
+        self.manual_clear_row_button.clicked.connect(self.on_manual_clear_row_clicked)
+        assign_layout.addWidget(self.manual_assign_start_button)
+        assign_layout.addWidget(self.manual_assign_end_button)
+        assign_layout.addWidget(self.manual_clear_row_button)
+        assign_layout.addStretch(1)
+
+        manual_layout.addLayout(nav_layout)
+        manual_layout.addWidget(self.manual_frame_slider)
+        manual_layout.addLayout(step_layout)
+        manual_layout.addLayout(assign_layout)
 
         color_controls_layout = QHBoxLayout()
         color_controls_layout.addWidget(self.color_roi_label)
@@ -1374,10 +1435,11 @@ class MainWindow(QMainWindow):
         upper_layout = QVBoxLayout(upper_section)
         upper_layout.setContentsMargins(0, 0, 0, 0)
         upper_layout.addLayout(top_row_layout)
+        upper_layout.addWidget(self.manual_controls_box)
         upper_layout.addWidget(self.event_table, stretch=1)
 
-        lower_section = QWidget(right_panel)
-        lower_layout = QVBoxLayout(lower_section)
+        self.event_lower_section = QWidget(right_panel)
+        lower_layout = QVBoxLayout(self.event_lower_section)
         lower_layout.setContentsMargins(0, 0, 0, 0)
         lower_layout.addLayout(color_controls_layout)
         lower_layout.addWidget(self.color_progress)
@@ -1387,7 +1449,7 @@ class MainWindow(QMainWindow):
         self.event_vertical_splitter.setChildrenCollapsible(False)
         self.event_vertical_splitter.setHandleWidth(8)
         self.event_vertical_splitter.addWidget(upper_section)
-        self.event_vertical_splitter.addWidget(lower_section)
+        self.event_vertical_splitter.addWidget(self.event_lower_section)
         self.event_vertical_splitter.setStretchFactor(0, 3)
         self.event_vertical_splitter.setStretchFactor(1, 2)
         self.event_vertical_splitter.setSizes([420, 320])
@@ -1440,23 +1502,260 @@ class MainWindow(QMainWindow):
         if event_index >= 0:
             self.main_tabs.setTabEnabled(event_index, True)
 
+        self._update_analysis_controls()
+
         if open_event_tab:
             self.switch_to_event_tab()
         else:
             self.switch_to_roi_tab()
 
+    def _build_manual_events_payload(self) -> list[dict]:
+        return [
+            {
+                "id": int(event_info["id"]),
+                "name": str(event_info["name"]),
+                "target_roi": str(event_info["target_roi"]),
+                "type": str(event_info["type"]),
+                "start": None,
+                "end": None,
+                "confidence": None,
+            }
+            for event_info in EVENT_DEFINITIONS
+        ]
+
+    def _selected_mode_from_combo(self) -> Optional[str]:
+        index = self.event_mode_combo.currentIndex()
+        if index < 0:
+            return None
+        data = self.event_mode_combo.itemData(index)
+        if data in (DETECTION_MODE_AUTO, DETECTION_MODE_MANUAL):
+            return str(data)
+        return None
+
+    def _sync_event_mode_combo_to_state(self) -> None:
+        target_mode = self.detection_mode if self.detection_mode in (DETECTION_MODE_AUTO, DETECTION_MODE_MANUAL) else None
+        if target_mode is None:
+            target_mode = DETECTION_MODE_AUTO
+
+        target_index = self.event_mode_combo.findData(target_mode)
+        if target_index < 0:
+            return
+        if self.event_mode_combo.currentIndex() == target_index:
+            return
+
+        self._syncing_mode_combo = True
+        try:
+            self.event_mode_combo.setCurrentIndex(target_index)
+        finally:
+            self._syncing_mode_combo = False
+
+    def _has_usable_video(self) -> bool:
+        return self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
+
+    def _confirm_discard_timeline_if_needed(self) -> bool:
+        if not self.timeline_dirty or not self.last_detected_events:
+            return True
+
+        response = QMessageBox.question(
+            self,
+            "Mod Degisimi",
+            "Kaydedilmemis olay degisiklikleri var. Mod degistirirseniz veriler temizlenecek.\nDevam etmek istiyor musunuz?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return response == QMessageBox.StandardButton.Yes
+
+    def _initialize_manual_events(self) -> None:
+        self.last_detected_events = self._build_manual_events_payload()
+        self.event_log.clear()
+        self.event_progress.setValue(0)
+        self.timeline_dirty = False
+        self._populate_event_table_from_results()
+
     def _apply_detection_mode(self, mode: Optional[str], source: str) -> bool:
-        del source
         if mode not in (DETECTION_MODE_AUTO, DETECTION_MODE_MANUAL, None):
             return False
         if mode == self.detection_mode:
+            self._sync_event_mode_combo_to_state()
             self._update_analysis_controls()
             return True
 
+        if self._is_event_detection_running() or self._is_color_analysis_running():
+            QMessageBox.information(self, "Mod Degisimi", "Calisan analiz varken mod degistirilemez.")
+            self._sync_event_mode_combo_to_state()
+            return False
+
+        if self.detection_mode is not None and not self._confirm_discard_timeline_if_needed():
+            self._sync_event_mode_combo_to_state()
+            return False
+
+        if mode == DETECTION_MODE_MANUAL and not self._has_usable_video():
+            if not self.open_video_dialog():
+                if source == "startup":
+                    self.statusBar().showMessage("Manuel mod icin video secimi gerekli.", 2600)
+                self._sync_event_mode_combo_to_state()
+                return False
+
         self.detection_mode = mode
-        self.timeline_dirty = False
+        if mode == DETECTION_MODE_MANUAL:
+            self._initialize_manual_events()
+            self._sync_manual_timeline_to_current_frame()
+        else:
+            self._invalidate_event_results()
+            self.timeline_dirty = False
+
+        self._sync_event_mode_combo_to_state()
         self._update_analysis_controls()
         return True
+
+    def on_event_mode_combo_changed(self, index: int) -> None:
+        del index
+        if self._syncing_mode_combo:
+            return
+        if not self.startup_completed:
+            self._sync_event_mode_combo_to_state()
+            return
+
+        selected_mode = self._selected_mode_from_combo()
+        if selected_mode is None:
+            self._sync_event_mode_combo_to_state()
+            return
+        self._apply_detection_mode(selected_mode, source="event")
+
+    def on_event_table_selection_changed(self) -> None:
+        self._update_analysis_controls()
+
+    def _manual_selected_row(self) -> Optional[int]:
+        row = int(self.event_table.currentRow())
+        if row < 0 or row >= len(self.last_detected_events):
+            return None
+        return row
+
+    def _manual_current_frame_and_seconds(self) -> Optional[tuple[int, float]]:
+        if self.video_meta is None:
+            return None
+        frame_index = max(0, int(self.video_meta.frame_index))
+        fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 30.0
+        seconds = float(frame_index) / fps
+        return frame_index, seconds
+
+    def _sync_manual_timeline_to_current_frame(self) -> None:
+        has_video = self.video_meta is not None
+        max_index = 0
+        if has_video:
+            if self.video_frame_count > 0:
+                max_index = max(0, self.video_frame_count - 1)
+            else:
+                max_index = max(0, int(self.video_meta.frame_index))
+
+        self._syncing_manual_slider = True
+        try:
+            self.manual_frame_slider.setRange(0, max_index)
+            if has_video:
+                self.manual_frame_slider.setValue(max(0, min(max_index, int(self.video_meta.frame_index))))
+            else:
+                self.manual_frame_slider.setValue(0)
+        finally:
+            self._syncing_manual_slider = False
+
+        if not has_video:
+            self.manual_time_label.setText("Frame: -")
+            return
+
+        frame_and_seconds = self._manual_current_frame_and_seconds()
+        if frame_and_seconds is None:
+            self.manual_time_label.setText("Frame: -")
+            return
+
+        frame_index, seconds = frame_and_seconds
+        total_text = "?"
+        if self.video_frame_count > 0:
+            total_text = str(self.video_frame_count - 1)
+        pretty_time = format_time_dk_sn_ms(seconds)
+        self.manual_time_label.setText(f"Frame: {frame_index}/{total_text} | {seconds:.2f} sn | {pretty_time}")
+
+    def on_manual_frame_slider_changed(self, frame_index: int) -> None:
+        if self._syncing_manual_slider:
+            return
+        if self.detection_mode != DETECTION_MODE_MANUAL:
+            return
+
+        frame_payload = self._read_video_frame_at_index(int(frame_index))
+        if frame_payload is None:
+            self.statusBar().showMessage("Frame okunamadi.", 2200)
+            return
+
+        frame_bgr, actual_frame = frame_payload
+        self._apply_current_frame(frame_bgr, actual_frame)
+        self._sync_manual_timeline_to_current_frame()
+
+    def step_manual_frame(self, delta: int) -> None:
+        if self.detection_mode != DETECTION_MODE_MANUAL:
+            return
+        if self.video_meta is None:
+            QMessageBox.warning(self, "Manuel Olay", "Once bir video acin.")
+            return
+        target = int(self.manual_frame_slider.value()) + int(delta)
+        target = max(self.manual_frame_slider.minimum(), min(self.manual_frame_slider.maximum(), target))
+        self.manual_frame_slider.setValue(target)
+
+    def step_manual_seconds(self, delta_seconds: float) -> None:
+        if self.video_meta is None:
+            return
+        fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 30.0
+        frame_delta = int(round(float(delta_seconds) * fps))
+        if frame_delta == 0 and delta_seconds != 0.0:
+            frame_delta = 1 if delta_seconds > 0 else -1
+        self.step_manual_frame(frame_delta)
+
+    def _assign_manual_event_time(self, field_name: str) -> None:
+        if self.detection_mode != DETECTION_MODE_MANUAL:
+            return
+        row = self._manual_selected_row()
+        if row is None:
+            QMessageBox.information(self, "Manuel Olay", "Start/End atamak icin bir event satiri secin.")
+            return
+
+        frame_and_seconds = self._manual_current_frame_and_seconds()
+        if frame_and_seconds is None:
+            QMessageBox.warning(self, "Manuel Olay", "Once bir video acin.")
+            return
+
+        _, seconds = frame_and_seconds
+        payload = dict(self.last_detected_events[row])
+        payload[field_name] = round(float(seconds), 2)
+        payload["confidence"] = None
+        self.last_detected_events[row] = payload
+        self.timeline_dirty = True
+        self._populate_event_table_from_results()
+        self.event_table.selectRow(row)
+        event_id = payload.get("id", row + 1)
+        self.statusBar().showMessage(f"Event {event_id} {field_name} atandi: {format_time_dk_sn_ms(seconds)}", 2600)
+
+    def on_manual_assign_start_clicked(self) -> None:
+        self._assign_manual_event_time("start")
+
+    def on_manual_assign_end_clicked(self) -> None:
+        self._assign_manual_event_time("end")
+
+    def on_manual_clear_row_clicked(self) -> None:
+        if self.detection_mode != DETECTION_MODE_MANUAL:
+            return
+        row = self._manual_selected_row()
+        if row is None:
+            QMessageBox.information(self, "Manuel Olay", "Temizlemek icin bir event satiri secin.")
+            return
+
+        payload = dict(self.last_detected_events[row])
+        payload["start"] = None
+        payload["end"] = None
+        payload["confidence"] = None
+        self.last_detected_events[row] = payload
+        self.timeline_dirty = True
+        self._populate_event_table_from_results()
+        self.event_table.selectRow(row)
+        event_id = payload.get("id", row + 1)
+        self.statusBar().showMessage(f"Event {event_id} zamanlari temizlendi.", 2300)
 
     def switch_to_roi_tab(self) -> None:
         roi_index = self.main_tabs.indexOf(self.roi_tab)
@@ -1494,6 +1793,39 @@ class MainWindow(QMainWindow):
             self._set_time_table_item(row, EVENT_COL_START, None)
             self._set_time_table_item(row, EVENT_COL_END, None)
             self._set_table_item(row, 6, "0.00")
+
+    def _populate_event_table_from_results(self) -> None:
+        self._reset_event_table()
+        for row, event in enumerate(self.last_detected_events):
+            if row >= self.event_table.rowCount():
+                break
+
+            try:
+                start_seconds = None if event.get("start") is None else float(event.get("start"))
+            except (TypeError, ValueError):
+                start_seconds = None
+            try:
+                end_seconds = None if event.get("end") is None else float(event.get("end"))
+            except (TypeError, ValueError):
+                end_seconds = None
+
+            confidence_text = "0.00"
+            confidence_raw = event.get("confidence")
+            if self.detection_mode == DETECTION_MODE_MANUAL and confidence_raw is None:
+                confidence_text = ""
+            else:
+                try:
+                    confidence_text = f"{float(confidence_raw):.2f}"
+                except (TypeError, ValueError):
+                    confidence_text = "0.00"
+
+            self._set_table_item(row, 0, str(event.get("id", row + 1)))
+            self._set_table_item(row, 1, str(event.get("name", "")))
+            self._set_table_item(row, 2, str(event.get("target_roi", "")))
+            self._set_table_item(row, 3, str(event.get("type", "")))
+            self._set_time_table_item(row, EVENT_COL_START, start_seconds)
+            self._set_time_table_item(row, EVENT_COL_END, end_seconds)
+            self._set_table_item(row, 6, confidence_text)
 
     def _set_event_frame_preview_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         if pixmap is None or pixmap.isNull():
@@ -1543,39 +1875,82 @@ class MainWindow(QMainWindow):
         event_running = self._is_event_detection_running()
         color_running = self._is_color_analysis_running()
         any_running = event_running or color_running
+        is_auto = self.detection_mode == DETECTION_MODE_AUTO
+        is_manual = self.detection_mode == DETECTION_MODE_MANUAL
+        mode_ready = is_auto or is_manual
 
-        self.sample_hz_spin.setEnabled(not any_running)
-        self.source_sensitivity_combo.setEnabled(not any_running)
+        self._sync_event_mode_combo_to_state()
+        self.event_mode_combo.setEnabled(self.startup_completed and mode_ready and not any_running)
+        self.event_open_video_button.setEnabled(not any_running)
 
-        if event_running:
+        self.sample_hz_spin.setVisible(is_auto)
+        self.source_sensitivity_label.setVisible(is_auto)
+        self.source_sensitivity_combo.setVisible(is_auto)
+        self.detect_button.setVisible(is_auto)
+        self.manual_controls_box.setVisible(is_manual)
+        self.event_lower_section.setVisible(is_auto)
+        if is_auto:
+            self.event_vertical_splitter.setSizes([420, 320])
+        else:
+            self.event_vertical_splitter.setSizes([740, 0])
+
+        self.sample_hz_spin.setEnabled(is_auto and not any_running)
+        self.source_sensitivity_combo.setEnabled(is_auto and not any_running)
+
+        if is_auto and event_running:
             if self._event_detection_cancel_requested:
                 self.detect_button.setText("Olay Tespiti Durduruluyor...")
                 self.detect_button.setEnabled(False)
             else:
                 self.detect_button.setText("Olay Tespitini Durdur")
                 self.detect_button.setEnabled(True)
-        else:
+        elif is_auto:
             self.detect_button.setText("Olaylari Tespit Et")
             self.detect_button.setEnabled(not color_running)
+        else:
+            self.detect_button.setText("Olaylari Tespit Et")
+            self.detect_button.setEnabled(False)
 
         has_roi_choice = self.color_roi_combo.count() > 0
-        self.color_roi_combo.setEnabled(has_roi_choice and not any_running)
-        can_start_color = has_roi_choice and self.video_meta is not None and self._selected_color_roi_name() is not None
-        if color_running:
+        can_start_color = (
+            is_auto and has_roi_choice and self.video_meta is not None and self._selected_color_roi_name() is not None
+        )
+        self.color_roi_combo.setEnabled(is_auto and has_roi_choice and not any_running)
+        if is_auto and color_running:
             if self._color_analysis_cancel_requested:
                 self.color_analyze_button.setText("Renk Analizi Durduruluyor...")
                 self.color_analyze_button.setEnabled(False)
             else:
                 self.color_analyze_button.setText("Renk Analizini Durdur")
                 self.color_analyze_button.setEnabled(True)
-        else:
+        elif is_auto:
             self.color_analyze_button.setText("ROI Renk Analizi")
             self.color_analyze_button.setEnabled(can_start_color and not event_running)
-
-        if any_running:
-            self.save_timeline_button.setEnabled(False)
         else:
-            self.save_timeline_button.setEnabled(bool(self.last_detected_events))
+            self.color_analyze_button.setText("ROI Renk Analizi")
+            self.color_analyze_button.setEnabled(False)
+
+        if is_manual:
+            self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            self.event_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        else:
+            self.event_table.clearSelection()
+            self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            self.event_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+
+        manual_video_ready = is_manual and self.video_meta is not None
+        manual_row_selected = self._manual_selected_row() is not None
+        manual_controls_enabled = manual_video_ready and not any_running
+        self.manual_frame_slider.setEnabled(manual_controls_enabled)
+        self.manual_step_minus_sec_button.setEnabled(manual_controls_enabled)
+        self.manual_step_minus_frame_button.setEnabled(manual_controls_enabled)
+        self.manual_step_plus_frame_button.setEnabled(manual_controls_enabled)
+        self.manual_step_plus_sec_button.setEnabled(manual_controls_enabled)
+        self.manual_assign_start_button.setEnabled(manual_controls_enabled and manual_row_selected)
+        self.manual_assign_end_button.setEnabled(manual_controls_enabled and manual_row_selected)
+        self.manual_clear_row_button.setEnabled(manual_controls_enabled and manual_row_selected)
+
+        self.save_timeline_button.setEnabled(mode_ready and (not any_running) and bool(self.last_detected_events))
 
     def _set_detection_controls(self, running: bool) -> None:
         self._event_detection_busy = bool(running)
@@ -1587,6 +1962,7 @@ class MainWindow(QMainWindow):
 
     def _invalidate_event_results(self) -> None:
         self.last_detected_events = []
+        self.timeline_dirty = False
         self.event_progress.setValue(0)
         self._reset_event_table()
         self._update_analysis_controls()
@@ -1714,6 +2090,9 @@ class MainWindow(QMainWindow):
         self._update_analysis_controls()
 
     def start_event_detection(self) -> None:
+        if self.detection_mode != DETECTION_MODE_AUTO:
+            QMessageBox.information(self, "Olay Tespit", "Bu islem sadece otomatik modda kullanilir.")
+            return
         if self._is_event_detection_running():
             QMessageBox.information(self, "Olay Tespit", "Analiz zaten calisiyor.")
             return
@@ -1734,8 +2113,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Olay Tespit", f"Eksik hedef ROI: {joined}")
             return
 
-        self.main_tabs.setCurrentIndex(1)
+        self.switch_to_event_tab()
         self.last_detected_events = []
+        self.timeline_dirty = False
         self.last_detection_sample_hz = int(self.sample_hz_spin.value())
         self._last_detection_log_message = ""
         self._event_detection_cancel_requested = False
@@ -1778,33 +2158,15 @@ class MainWindow(QMainWindow):
 
     def on_event_detection_result(self, events: list) -> None:
         self.last_detected_events = [dict(item) for item in events]
-        for row, event in enumerate(self.last_detected_events):
-            if row >= self.event_table.rowCount():
-                break
-            start_seconds: Optional[float]
-            end_seconds: Optional[float]
-            try:
-                start_seconds = None if event.get("start") is None else float(event.get("start"))
-            except (TypeError, ValueError):
-                start_seconds = None
-            try:
-                end_seconds = None if event.get("end") is None else float(event.get("end"))
-            except (TypeError, ValueError):
-                end_seconds = None
-            confidence_text = f"{float(event.get('confidence', 0.0)):.2f}"
-
-            self._set_table_item(row, 0, str(event.get("id", row + 1)))
-            self._set_table_item(row, 1, str(event.get("name", "")))
-            self._set_table_item(row, 2, str(event.get("target_roi", "")))
-            self._set_table_item(row, 3, str(event.get("type", "")))
-            self._set_time_table_item(row, EVENT_COL_START, start_seconds)
-            self._set_time_table_item(row, EVENT_COL_END, end_seconds)
-            self._set_table_item(row, 6, confidence_text)
-
+        self.timeline_dirty = True
+        self._populate_event_table_from_results()
         self.event_progress.setValue(100)
         self._append_event_log("Analiz sonucu tabloya yazildi.")
 
     def start_roi_color_analysis(self) -> None:
+        if self.detection_mode != DETECTION_MODE_AUTO:
+            QMessageBox.information(self, "ROI Renk Analizi", "Renk analizi sadece otomatik modda kullanilir.")
+            return
         if self._is_color_analysis_running():
             QMessageBox.information(self, "ROI Renk Analizi", "Renk analizi zaten calisiyor.")
             return
@@ -1829,7 +2191,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "ROI Renk Analizi", f"Secili ROI bulunamadi: {roi_name}")
             return
 
-        self.main_tabs.setCurrentIndex(1)
+        self.switch_to_event_tab()
         self._invalidate_roi_color_results(refresh_combo=False)
         self._append_event_log(f"ROI renk analizi basladi: {roi_name}")
         self._color_analysis_cancel_requested = False
@@ -1948,7 +2310,7 @@ class MainWindow(QMainWindow):
         pretty_time = format_time_dk_sn_ms(seconds)
         self.statusBar().showMessage(f"Event {event_id} {field_name}: {pretty_time}", 2800)
 
-    def _read_video_frame_at_seconds(self, seconds: float) -> Optional[Tuple[np.ndarray, int]]:
+    def _read_video_frame_at_index(self, frame_index: int) -> Optional[Tuple[np.ndarray, int]]:
         if self.video_meta is None:
             return None
 
@@ -1961,30 +2323,29 @@ class MainWindow(QMainWindow):
             return None
 
         try:
-            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
-            if fps <= 0.0:
-                fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 30.0
-
             frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-            target_frame = int(round(max(0.0, seconds) * fps))
+            target_frame = max(0, int(frame_index))
             if frame_count > 0:
                 target_frame = max(0, min(frame_count - 1, target_frame))
-            else:
-                target_frame = max(0, target_frame)
+            self.video_frame_count = max(self.video_frame_count, frame_count)
 
             capture.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
             ok, frame = capture.read()
             if not ok or frame is None:
-                capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, seconds) * 1000.0)
-                ok, frame = capture.read()
-                if not ok or frame is None:
-                    return None
+                return None
 
             reported_next = int(capture.get(cv2.CAP_PROP_POS_FRAMES) or (target_frame + 1))
             actual_frame = max(0, reported_next - 1)
             return frame, actual_frame
         finally:
             capture.release()
+
+    def _read_video_frame_at_seconds(self, seconds: float) -> Optional[Tuple[np.ndarray, int]]:
+        if self.video_meta is None:
+            return None
+        fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 30.0
+        target_frame = int(round(max(0.0, float(seconds)) * fps))
+        return self._read_video_frame_at_index(target_frame)
 
     def _apply_current_frame(self, frame_bgr: np.ndarray, frame_index: int) -> None:
         if self.video_meta is None:
@@ -2005,6 +2366,7 @@ class MainWindow(QMainWindow):
         self.canvas.set_rois(self.rois_rel)
         self._set_event_frame_preview_pixmap(display_pixmap)
         self.update_selected_roi_panel()
+        self._sync_manual_timeline_to_current_frame()
 
     def on_event_detection_error(self, message: str) -> None:
         self._append_event_log(f"Hata: {message}")
@@ -2202,7 +2564,7 @@ class MainWindow(QMainWindow):
     def on_draw_without_selection(self) -> None:
         self.statusBar().showMessage("Add or select an ROI before drawing.", 2600)
 
-    def open_video_dialog(self) -> None:
+    def open_video_dialog(self) -> bool:
         initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
         if not initial_dir or not os.path.isdir(initial_dir):
             if self.video_meta is not None:
@@ -2219,19 +2581,19 @@ class MainWindow(QMainWindow):
             "MP4 Files (*.mp4);;Video Files (*.mp4 *.mov *.mkv *.avi);;All Files (*.*)",
         )
         if not path:
-            return
+            return False
 
         selected_dir = os.path.dirname(path)
         if selected_dir and os.path.isdir(selected_dir):
             self.settings.setValue(SETTINGS_LAST_VIDEO_DIR, selected_dir)
 
-        self.load_video(path)
+        return self.load_video(path)
 
-    def load_video(self, path: str) -> None:
+    def load_video(self, path: str) -> bool:
         capture = cv2.VideoCapture(path)
         if not capture.isOpened():
             QMessageBox.warning(self, "Open Video", "Failed to open video file.")
-            return
+            return False
 
         width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
         height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
@@ -2252,7 +2614,7 @@ class MainWindow(QMainWindow):
 
         if not ok or frame is None:
             QMessageBox.warning(self, "Open Video", "Could not read a frame from this video.")
-            return
+            return False
 
         self.video_meta = VideoMeta(
             width=width if width > 0 else frame.shape[1],
@@ -2261,6 +2623,7 @@ class MainWindow(QMainWindow):
             frame_index=frame_index,
             source_video=path,
         )
+        self.video_frame_count = max(0, frame_count)
         video_dir = os.path.dirname(path)
         if video_dir and os.path.isdir(video_dir):
             self.settings.setValue(SETTINGS_LAST_VIDEO_DIR, video_dir)
@@ -2276,9 +2639,14 @@ class MainWindow(QMainWindow):
             self.set_active_roi_name(self.active_roi_name, announce=False)
 
         self._update_event_video_label()
-        self._invalidate_event_results()
+        if self.detection_mode == DETECTION_MODE_MANUAL:
+            self._initialize_manual_events()
+            self.switch_to_event_tab()
+        else:
+            self._invalidate_event_results()
         self._invalidate_roi_color_results(refresh_combo=True)
         self.statusBar().showMessage(f"Video loaded: {os.path.basename(path)}", 3000)
+        return True
 
     def _build_display_rgb(self, frame_bgr: np.ndarray) -> np.ndarray:
         frame_h, frame_w = frame_bgr.shape[:2]
