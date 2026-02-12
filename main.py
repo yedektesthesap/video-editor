@@ -2596,15 +2596,12 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "timeline.json", "Analiz calisirken timeline yuklenemez.")
             return
 
-        initial_dir = os.getcwd()
-        if self.video_meta is not None:
-            video_dir = os.path.dirname(self.video_meta.source_video)
-            if os.path.isdir(video_dir):
-                initial_dir = video_dir
-        elif self.current_template_path:
-            template_dir = os.path.dirname(self.current_template_path)
-            if os.path.isdir(template_dir):
-                initial_dir = template_dir
+        if getattr(sys, "frozen", False):
+            initial_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            initial_dir = os.path.dirname(os.path.abspath(__file__))
+        if not os.path.isdir(initial_dir):
+            initial_dir = os.getcwd()
 
         load_path, _ = QFileDialog.getOpenFileName(
             self,
