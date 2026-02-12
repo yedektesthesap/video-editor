@@ -1192,6 +1192,8 @@ class MainWindow(QMainWindow):
             return False
 
         if screen == self._current_screen:
+            if self.main_stack.currentWidget() is not target:
+                self.main_stack.setCurrentWidget(target)
             self._update_navigation_bar()
             return True
 
