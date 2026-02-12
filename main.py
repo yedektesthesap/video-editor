@@ -1270,19 +1270,6 @@ class MainWindow(QMainWindow):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 22px; font-weight: 700;")
 
-        subtitle = QLabel("Devam etmeden once bir video secin.")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("color: #b8c0cc;")
-
-        self.video_mode_info_label = QLabel("Secilen mod: -")
-        self.video_mode_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_mode_info_label.setStyleSheet("color: #d3d9e5;")
-
-        self.video_path_info_label = QLabel("Secili video: -")
-        self.video_path_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_path_info_label.setStyleSheet("color: #9aa4b7;")
-        self.video_path_info_label.setWordWrap(True)
-
         self.video_select_continue_button = QPushButton("Video Sec ve Devam Et")
         self.video_select_continue_button.setMinimumHeight(46)
         self.video_select_continue_button.clicked.connect(self.on_video_select_screen_pick_clicked)
@@ -1292,9 +1279,6 @@ class MainWindow(QMainWindow):
         wrapper_layout.setContentsMargins(0, 0, 0, 0)
         wrapper_layout.setSpacing(8)
         wrapper_layout.addWidget(title)
-        wrapper_layout.addWidget(subtitle)
-        wrapper_layout.addWidget(self.video_mode_info_label)
-        wrapper_layout.addWidget(self.video_path_info_label)
         wrapper_layout.addWidget(self.video_select_continue_button)
         wrapper.setMaximumWidth(520)
 
@@ -1308,18 +1292,7 @@ class MainWindow(QMainWindow):
         self._update_video_select_screen_text()
 
     def _update_video_select_screen_text(self) -> None:
-        mode_text = "-"
-        if self.detection_mode == DETECTION_MODE_AUTO:
-            mode_text = "Otomatik Olay Tespiti"
-        elif self.detection_mode == DETECTION_MODE_MANUAL:
-            mode_text = "Manuel Olay Tespiti"
-        self.video_mode_info_label.setText(f"Secilen mod: {mode_text}")
-
-        if self.video_meta is None:
-            self.video_path_info_label.setText("Secili video: -")
-        else:
-            base_name = os.path.basename(self.video_meta.source_video)
-            self.video_path_info_label.setText(f"Secili video: {base_name}")
+        return
 
     def _build_roi_tab(self, container: QWidget) -> None:
         main_layout = QHBoxLayout(container)
