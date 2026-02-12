@@ -1375,7 +1375,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(right_panel)
         layout.setContentsMargins(0, 0, 0, 0)
         right_panel.setMinimumWidth(460)
-        layout.addWidget(self.event_video_label)
+        self.load_timeline_button = QPushButton("timeline.json Yukle")
+        self.load_timeline_button.clicked.connect(self.load_timeline_json)
+        top_header_layout = QHBoxLayout()
+        top_header_layout.setContentsMargins(0, 0, 0, 0)
+        top_header_layout.addWidget(self.event_video_label, stretch=1)
+        top_header_layout.addWidget(self.load_timeline_button)
+        layout.addLayout(top_header_layout)
 
         controls_layout = QHBoxLayout()
         self.event_mode_label = QLabel("Mod:")
@@ -1399,8 +1405,6 @@ class MainWindow(QMainWindow):
         self.save_timeline_button = QPushButton("timeline.json Kaydet")
         self.save_timeline_button.setEnabled(False)
         self.save_timeline_button.clicked.connect(self.save_timeline_json)
-        self.load_timeline_button = QPushButton("timeline.json Yukle")
-        self.load_timeline_button.clicked.connect(self.load_timeline_json)
 
         self.color_roi_label = QLabel("Renk ROI:")
         self.color_roi_combo = QComboBox()
@@ -1556,12 +1560,6 @@ class MainWindow(QMainWindow):
         left_initial = max(220, self.event_frame_preview.minimumWidth())
         self.event_splitter.setSizes([left_initial, 1800])
         root_layout.addWidget(self.event_splitter)
-
-        bottom_actions_layout = QHBoxLayout()
-        bottom_actions_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_actions_layout.addWidget(self.load_timeline_button)
-        bottom_actions_layout.addStretch(1)
-        root_layout.addLayout(bottom_actions_layout)
 
         self._reset_event_table()
         self._refresh_color_roi_combo()
