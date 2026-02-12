@@ -17,6 +17,7 @@ from PyQt6.QtGui import QColor, QImage, QKeySequence, QPainter, QPainterPath, QP
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -25,6 +26,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -1092,21 +1094,28 @@ class MainWindow(QMainWindow):
         self.detect_worker: Optional[EventDetectionWorker] = None
         self.color_thread: Optional[QThread] = None
         self.color_worker: Optional[RoiColorAnalysisWorker] = None
+        self.edit_thread: Optional[QThread] = None
+        self.edit_worker: Optional[object] = None
         self.last_detected_events: list[dict] = []
         self.last_roi_color_payload: Optional[dict] = None
+        self.edit_segments: list[tuple[float, float]] = []
         self.last_detection_sample_hz = 10
         self._last_detection_log_message = ""
+        self._last_edit_log_message = ""
         self._syncing_color_roi_combo = False
         self._syncing_mode_combo = False
         self._syncing_manual_slider = False
         self._event_detection_busy = False
         self._color_analysis_busy = False
+        self._video_edit_busy = False
         self._event_detection_cancel_requested = False
         self._color_analysis_cancel_requested = False
+        self._video_edit_cancel_requested = False
         self.detection_mode: Optional[str] = None
         self.timeline_dirty = False
         self.startup_tab: Optional[QWidget] = None
         self.video_select_tab: Optional[QWidget] = None
+        self.edit_tab: Optional[QWidget] = None
         self.startup_completed = False
         self._screen_history: list[str] = []
         self._current_screen = "video"
@@ -1169,6 +1178,10 @@ class MainWindow(QMainWindow):
         self._build_event_tab(self.event_tab)
         self.main_stack.addWidget(self.event_tab)
 
+        self.edit_tab = QWidget(self)
+        self._build_edit_tab(self.edit_tab)
+        self.main_stack.addWidget(self.edit_tab)
+
         self._set_current_screen("video", push_history=False)
 
     def _screen_title(self, screen: str) -> str:
@@ -1180,6 +1193,8 @@ class MainWindow(QMainWindow):
             return "ROI Secimi"
         if screen == "event":
             return "Olay Tespit"
+        if screen == "edit":
+            return "Video Edit"
         return "Ekran"
 
     def _screen_widget(self, screen: str) -> Optional[QWidget]:
@@ -1191,6 +1206,8 @@ class MainWindow(QMainWindow):
             return self.roi_tab
         if screen == "event":
             return self.event_tab
+        if screen == "edit":
+            return self.edit_tab
         return None
 
     def _set_current_screen(self, screen: str, push_history: bool) -> bool:
@@ -1581,6 +1598,78 @@ class MainWindow(QMainWindow):
         self._refresh_color_roi_combo()
         self._update_analysis_controls()
 
+    def _build_edit_tab(self, container: QWidget) -> None:
+        root_layout = QVBoxLayout(container)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(8)
+
+        self.edit_source_video_label = QLabel("Kaynak video: -")
+        root_layout.addWidget(self.edit_source_video_label)
+
+        self.edit_cut_group = QGroupBox("Cut Ayarlari")
+        cut_layout = QVBoxLayout(self.edit_cut_group)
+        cut_layout.setContentsMargins(8, 8, 8, 8)
+        cut_layout.setSpacing(6)
+
+        self.edit_cut_enabled_checkbox = QCheckBox("Enable Cut")
+        self.edit_cut_enabled_checkbox.setChecked(True)
+        self.edit_cut_enabled_checkbox.stateChanged.connect(self._update_edit_controls)
+
+        self.edit_segments_label = QLabel("Hazir segment: -")
+        self.edit_segments_label.setStyleSheet("color: #9aa4b7;")
+
+        output_layout = QHBoxLayout()
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.addWidget(QLabel("Cikti Dosyasi:"))
+        self.edit_output_path_edit = QLineEdit()
+        self.edit_output_path_edit.setPlaceholderText("Cikti dosya yolu")
+        self.edit_output_path_edit.textChanged.connect(self._update_edit_controls)
+        self.edit_output_browse_button = QPushButton("Gozat")
+        self.edit_output_browse_button.clicked.connect(self.on_edit_output_browse_clicked)
+        output_layout.addWidget(self.edit_output_path_edit, stretch=1)
+        output_layout.addWidget(self.edit_output_browse_button)
+
+        quality_layout = QHBoxLayout()
+        quality_layout.setContentsMargins(0, 0, 0, 0)
+        quality_layout.addWidget(QLabel("Preset:"))
+        self.edit_preset_combo = QComboBox()
+        self.edit_preset_combo.addItems(["ultrafast", "fast", "medium", "slow"])
+        self.edit_preset_combo.setCurrentText("medium")
+        quality_layout.addWidget(self.edit_preset_combo)
+        quality_layout.addWidget(QLabel("CRF:"))
+        self.edit_crf_spin = QSpinBox()
+        self.edit_crf_spin.setRange(0, 51)
+        self.edit_crf_spin.setValue(18)
+        quality_layout.addWidget(self.edit_crf_spin)
+        quality_layout.addStretch(1)
+
+        run_layout = QHBoxLayout()
+        run_layout.setContentsMargins(0, 0, 0, 0)
+        run_layout.addStretch(1)
+        self.edit_run_button = QPushButton("Edit Islemine Basla")
+        self.edit_run_button.clicked.connect(self.on_edit_run_button_clicked)
+        run_layout.addWidget(self.edit_run_button)
+
+        cut_layout.addWidget(self.edit_cut_enabled_checkbox)
+        cut_layout.addWidget(self.edit_segments_label)
+        cut_layout.addLayout(output_layout)
+        cut_layout.addLayout(quality_layout)
+        cut_layout.addLayout(run_layout)
+
+        self.edit_progress = QProgressBar()
+        self.edit_progress.setRange(0, 100)
+        self.edit_progress.setValue(0)
+
+        self.edit_log = QPlainTextEdit()
+        self.edit_log.setReadOnly(True)
+        self.edit_log.setPlaceholderText("FFmpeg edit loglari burada gorunecek.")
+        self.edit_log.setMaximumBlockCount(400)
+
+        root_layout.addWidget(self.edit_cut_group)
+        root_layout.addWidget(self.edit_progress)
+        root_layout.addWidget(self.edit_log, stretch=1)
+        self._update_edit_controls()
+
     def _setup_shortcuts(self) -> None:
         for index in range(1, MAX_SHORTCUT_ROIS + 1):
             shortcut = QShortcut(QKeySequence(str(index)), self)
@@ -1668,10 +1757,12 @@ class MainWindow(QMainWindow):
 
     def _initialize_manual_events(self) -> None:
         self.last_detected_events = self._build_manual_events_payload()
+        self.edit_segments = []
         self.event_log.clear()
         self.event_progress.setValue(0)
         self.timeline_dirty = False
         self._populate_event_table_from_results()
+        self._update_edit_segments_label()
 
     def _apply_detection_mode(
         self,
@@ -1851,8 +1942,151 @@ class MainWindow(QMainWindow):
     def switch_to_event_tab(self) -> None:
         self._set_current_screen("event", push_history=True)
 
+    def switch_to_edit_tab(self) -> None:
+        self._set_current_screen("edit", push_history=True)
+
     def on_open_edit_clicked(self) -> None:
-        self.statusBar().showMessage("Edit ekrani henuz hazir degil.", 2200)
+        if self.video_meta is None or not os.path.isfile(self.video_meta.source_video):
+            QMessageBox.warning(self, "Edit", "Aktif video bulunamadi.")
+            return
+        if self._is_video_edit_running():
+            QMessageBox.information(self, "Edit", "Video edit islemi zaten calisiyor.")
+            return
+
+        segments, error = self._build_merged_cut_segments()
+        if error is not None or segments is None:
+            QMessageBox.warning(self, "Edit", error or "Kesim segmentleri hazirlanamadi.")
+            return
+
+        self.edit_segments = segments
+        source_path = self.video_meta.source_video
+        self.edit_output_path_edit.setText(self._default_cut_output_path(source_path))
+        self._update_edit_video_label()
+        self._update_edit_segments_label()
+        self.edit_progress.setValue(0)
+        self.edit_log.clear()
+        self._append_edit_log(self._format_segments_summary(self.edit_segments))
+        self._update_edit_controls()
+        self.switch_to_edit_tab()
+
+    def on_edit_output_browse_clicked(self) -> None:
+        if self.video_meta is None:
+            QMessageBox.warning(self, "Edit", "Once bir video acin.")
+            return
+        base_output = self.edit_output_path_edit.text().strip() or self._default_cut_output_path(self.video_meta.source_video)
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Cikti Video Kaydet",
+            base_output,
+            "MP4 Files (*.mp4);;All Files (*.*)",
+        )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".mp4"):
+            save_path += ".mp4"
+        self.edit_output_path_edit.setText(save_path)
+        self._update_edit_controls()
+
+    def on_edit_run_button_clicked(self) -> None:
+        QMessageBox.information(self, "Edit", "FFmpeg calistirma akisi bir sonraki adimda eklenecek.")
+
+    def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
+        if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
+            return None, "Kesim icin tum event satirlarinda start/end degeri dolu olmalidir."
+
+        raw_segments: list[tuple[float, float]] = []
+        for row, event_info in enumerate(EVENT_DEFINITIONS):
+            event_payload = self.last_detected_events[row] if row < len(self.last_detected_events) else {}
+            event_id = int(event_payload.get("id", event_info["id"]))
+            raw_start = event_payload.get("start")
+            raw_end = event_payload.get("end")
+            if raw_start is None or raw_end is None:
+                return None, f"Event {event_id} icin start/end bos birakilamaz."
+            try:
+                start_seconds = float(raw_start)
+                end_seconds = float(raw_end)
+            except (TypeError, ValueError):
+                return None, f"Event {event_id} zaman bilgisi gecersiz."
+            if end_seconds <= start_seconds:
+                return None, f"Event {event_id} icin end zamani start zamanindan buyuk olmalidir."
+            raw_segments.append((start_seconds, end_seconds))
+
+        if not raw_segments:
+            return None, "Gecerli kesim araligi bulunamadi."
+
+        sorted_segments = sorted(raw_segments, key=lambda item: (item[0], item[1]))
+        merged_segments: list[tuple[float, float]] = []
+        for start_seconds, end_seconds in sorted_segments:
+            if not merged_segments:
+                merged_segments.append((start_seconds, end_seconds))
+                continue
+            last_start, last_end = merged_segments[-1]
+            if start_seconds <= last_end:
+                merged_segments[-1] = (last_start, max(last_end, end_seconds))
+            else:
+                merged_segments.append((start_seconds, end_seconds))
+
+        if not merged_segments:
+            return None, "Gecerli kesim araligi bulunamadi."
+        return merged_segments, None
+
+    def _default_cut_output_path(self, source_video: str) -> str:
+        source_dir = os.path.dirname(source_video)
+        source_name = os.path.splitext(os.path.basename(source_video))[0].strip()
+        if not source_name:
+            source_name = "video"
+        return os.path.join(source_dir, f"{source_name}_cut.mp4")
+
+    def _format_segments_summary(self, segments: list[tuple[float, float]]) -> str:
+        total = sum(max(0.0, end_seconds - start_seconds) for start_seconds, end_seconds in segments)
+        return f"Kesim segmentleri hazirlandi: {len(segments)} adet | Toplam: {total:.2f} sn"
+
+    def _update_edit_video_label(self) -> None:
+        if not hasattr(self, "edit_source_video_label"):
+            return
+        if self.video_meta is None:
+            self.edit_source_video_label.setText("Kaynak video: -")
+            return
+        self.edit_source_video_label.setText(f"Kaynak video: {self.video_meta.source_video}")
+
+    def _update_edit_segments_label(self) -> None:
+        if not hasattr(self, "edit_segments_label"):
+            return
+        if not self.edit_segments:
+            self.edit_segments_label.setText("Hazir segment: -")
+            return
+        self.edit_segments_label.setText(self._format_segments_summary(self.edit_segments))
+
+    def _append_edit_log(self, message: str) -> None:
+        if not hasattr(self, "edit_log"):
+            return
+        cleaned = message.strip()
+        if not cleaned:
+            return
+        self.edit_log.appendPlainText(cleaned)
+        self._last_edit_log_message = cleaned
+
+    def _is_video_edit_running(self) -> bool:
+        return self._video_edit_busy or (self.edit_thread is not None and self.edit_thread.isRunning())
+
+    def _update_edit_controls(self) -> None:
+        if not hasattr(self, "edit_run_button"):
+            return
+        is_running = self._is_video_edit_running()
+        has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
+        has_segments = bool(self.edit_segments)
+        output_path = self.edit_output_path_edit.text().strip()
+        cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
+        analysis_running = self._is_event_detection_running() or self._is_color_analysis_running()
+        can_run = has_video and has_segments and bool(output_path) and cut_enabled and (not is_running) and (not analysis_running)
+
+        self.edit_cut_enabled_checkbox.setEnabled(not is_running)
+        self.edit_output_path_edit.setEnabled(not is_running)
+        self.edit_output_browse_button.setEnabled(not is_running)
+        self.edit_preset_combo.setEnabled(not is_running)
+        self.edit_crf_spin.setEnabled(not is_running)
+        self.edit_run_button.setEnabled(can_run)
+        self.edit_run_button.setText("Edit Islemine Basla" if not is_running else "Edit Islemi Durduruluyor...")
 
     def _update_event_table_frame_height(self) -> None:
         row_height = max(1, int(self.event_table.verticalHeader().defaultSectionSize()))
@@ -1966,9 +2200,11 @@ class MainWindow(QMainWindow):
     def _update_event_video_label(self) -> None:
         if self.video_meta is None:
             self.event_video_label.setText("Aktif video: -")
+            self._update_edit_video_label()
             return
         base_name = os.path.basename(self.video_meta.source_video)
         self.event_video_label.setText(f"Aktif video: {base_name}")
+        self._update_edit_video_label()
 
     def _append_event_log(self, message: str) -> None:
         cleaned = message.strip()
@@ -1994,7 +2230,8 @@ class MainWindow(QMainWindow):
     def _update_analysis_controls(self) -> None:
         event_running = self._is_event_detection_running()
         color_running = self._is_color_analysis_running()
-        any_running = event_running or color_running
+        edit_running = self._is_video_edit_running()
+        any_running = event_running or color_running or edit_running
         is_auto = self.detection_mode == DETECTION_MODE_AUTO
         is_manual = self.detection_mode == DETECTION_MODE_MANUAL
         mode_ready = is_auto or is_manual
@@ -2085,6 +2322,7 @@ class MainWindow(QMainWindow):
         self.load_timeline_button.setEnabled(mode_ready and (not any_running))
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
         self.edit_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
+        self._update_edit_controls()
 
     def _set_detection_controls(self, running: bool) -> None:
         self._event_detection_busy = bool(running)
@@ -2099,9 +2337,11 @@ class MainWindow(QMainWindow):
             self._update_analysis_controls()
             return
         self.last_detected_events = []
+        self.edit_segments = []
         self.timeline_dirty = False
         self.event_progress.setValue(0)
         self._reset_event_table()
+        self._update_edit_segments_label()
         self._update_analysis_controls()
 
     def _invalidate_roi_color_results(self, refresh_combo: bool = False) -> None:
@@ -2295,8 +2535,10 @@ class MainWindow(QMainWindow):
 
     def on_event_detection_result(self, events: list) -> None:
         self.last_detected_events = [dict(item) for item in events]
+        self.edit_segments = []
         self.timeline_dirty = True
         self._populate_event_table_from_results()
+        self._update_edit_segments_label()
         self.event_progress.setValue(100)
         self._append_event_log("Analiz sonucu tabloya yazildi.")
 
@@ -2667,8 +2909,10 @@ class MainWindow(QMainWindow):
                 self.sample_hz_spin.setValue(int(sample_hz))
 
         self.last_detected_events = parsed_events
+        self.edit_segments = []
         self.timeline_dirty = False
         self._populate_event_table_from_results()
+        self._update_edit_segments_label()
         self._append_event_log(f"timeline yuklendi: {load_path}")
         self.statusBar().showMessage(f"timeline yuklendi: {os.path.basename(load_path)}", 4000)
 
