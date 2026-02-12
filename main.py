@@ -2442,7 +2442,14 @@ class MainWindow(QMainWindow):
         self.sample_hz_spin.setVisible(is_auto)
         self.source_sensitivity_label.setVisible(is_auto)
         self.source_sensitivity_combo.setVisible(is_auto)
-        self.event_auto_controls_widget.setVisible(is_auto)
+        if is_auto:
+            self.event_auto_controls_widget.setVisible(True)
+            self.event_auto_controls_widget.setMinimumHeight(0)
+            self.event_auto_controls_widget.setMaximumHeight(16777215)
+        else:
+            self.event_auto_controls_widget.setVisible(False)
+            self.event_auto_controls_widget.setMinimumHeight(0)
+            self.event_auto_controls_widget.setMaximumHeight(0)
         self.detect_button.setVisible(is_auto)
         self.event_progress.setVisible(is_auto)
         self.event_log.setVisible(is_auto)
