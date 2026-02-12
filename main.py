@@ -73,6 +73,20 @@ EDIT_RESOLUTION_PRESETS: list[tuple[str, tuple[int, int]]] = [
     ("480p (854x480)", (854, 480)),
 ]
 EDIT_FPS_PRESETS: list[float] = [60.0, 50.0, 30.0, 25.0, 24.0]
+EDIT_SPEED_PRESETS: list[tuple[str, float]] = [
+    ("0.5x", 0.5),
+    ("0.75x", 0.75),
+    ("1.0x", 1.0),
+    ("1.25x", 1.25),
+    ("1.5x", 1.5),
+    ("2.0x", 2.0),
+]
+EDIT_AUDIO_EFFECT_PRESETS: list[tuple[str, str]] = [
+    ("Yok", "none"),
+    ("Bass boost", "bass_boost"),
+    ("Echo", "echo"),
+    ("Telefonik", "phone"),
+]
 
 SOURCE_START_SENSITIVITY_PRESETS: dict[str, dict[str, float]] = {
     "Hassas": {
@@ -1705,6 +1719,62 @@ class MainWindow(QMainWindow):
         resize_layout.addLayout(resize_target_layout)
         top_layout.addWidget(self.edit_resize_group)
 
+        self.edit_audio_group = QGroupBox("Ses Ayarlari")
+        audio_layout = QVBoxLayout(self.edit_audio_group)
+        audio_layout.setContentsMargins(8, 8, 8, 8)
+        audio_layout.setSpacing(6)
+        self.edit_remove_audio_checkbox = QCheckBox("Sesi Sil")
+        self.edit_remove_audio_checkbox.setChecked(False)
+        self.edit_remove_audio_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+        audio_layout.addWidget(self.edit_remove_audio_checkbox)
+        top_layout.addWidget(self.edit_audio_group)
+
+        self.edit_speed_group = QGroupBox("Video Hizi")
+        speed_layout = QVBoxLayout(self.edit_speed_group)
+        speed_layout.setContentsMargins(8, 8, 8, 8)
+        speed_layout.setSpacing(6)
+        self.edit_speed_enabled_checkbox = QCheckBox("Enable Video Hizi")
+        self.edit_speed_enabled_checkbox.setChecked(False)
+        self.edit_speed_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+
+        speed_target_layout = QHBoxLayout()
+        speed_target_layout.setContentsMargins(0, 0, 0, 0)
+        speed_target_layout.addWidget(QLabel("Hiz:"))
+        self.edit_speed_combo = QComboBox()
+        for label, factor in EDIT_SPEED_PRESETS:
+            self.edit_speed_combo.addItem(label, float(factor))
+        self.edit_speed_combo.setCurrentText("1.0x")
+        self.edit_speed_combo.currentIndexChanged.connect(self._update_edit_controls)
+        speed_target_layout.addWidget(self.edit_speed_combo)
+        speed_target_layout.addStretch(1)
+
+        speed_layout.addWidget(self.edit_speed_enabled_checkbox)
+        speed_layout.addLayout(speed_target_layout)
+        top_layout.addWidget(self.edit_speed_group)
+
+        self.edit_audio_effect_group = QGroupBox("Ses Efektleri")
+        effect_layout = QVBoxLayout(self.edit_audio_effect_group)
+        effect_layout.setContentsMargins(8, 8, 8, 8)
+        effect_layout.setSpacing(6)
+        self.edit_audio_effect_enabled_checkbox = QCheckBox("Enable Ses Efekti")
+        self.edit_audio_effect_enabled_checkbox.setChecked(False)
+        self.edit_audio_effect_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+
+        effect_target_layout = QHBoxLayout()
+        effect_target_layout.setContentsMargins(0, 0, 0, 0)
+        effect_target_layout.addWidget(QLabel("Efekt:"))
+        self.edit_audio_effect_combo = QComboBox()
+        for label, effect_key in EDIT_AUDIO_EFFECT_PRESETS:
+            self.edit_audio_effect_combo.addItem(label, effect_key)
+        self.edit_audio_effect_combo.setCurrentIndex(0)
+        self.edit_audio_effect_combo.currentIndexChanged.connect(self._update_edit_controls)
+        effect_target_layout.addWidget(self.edit_audio_effect_combo)
+        effect_target_layout.addStretch(1)
+
+        effect_layout.addWidget(self.edit_audio_effect_enabled_checkbox)
+        effect_layout.addLayout(effect_target_layout)
+        top_layout.addWidget(self.edit_audio_effect_group)
+
         bottom_content = QWidget(container)
         bottom_layout = QVBoxLayout(bottom_content)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
@@ -2035,6 +2105,9 @@ class MainWindow(QMainWindow):
                 source_video=source_path,
                 enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
                 enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
+                remove_audio=self._is_edit_remove_audio_enabled(),
+                enable_speed=self._is_edit_speed_enabled(),
+                enable_audio_effect=self._is_edit_audio_effect_enabled(),
             )
         )
         self.edit_progress.setValue(0)
@@ -2058,6 +2131,9 @@ class MainWindow(QMainWindow):
                 source_video=self.video_meta.source_video,
                 enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
                 enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
+                remove_audio=self._is_edit_remove_audio_enabled(),
+                enable_speed=self._is_edit_speed_enabled(),
+                enable_audio_effect=self._is_edit_audio_effect_enabled(),
             )
         save_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -2084,18 +2160,33 @@ class MainWindow(QMainWindow):
         if self.video_meta is not None and os.path.isfile(self.video_meta.source_video):
             source_path = self.video_meta.source_video
             current_output = self.edit_output_path_edit.text().strip()
-            auto_outputs = {
-                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=False, enable_resize=False)),
-                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=True, enable_resize=False)),
-                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=False, enable_resize=True)),
-                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=True, enable_resize=True)),
-            }
+            auto_outputs: set[str] = set()
+            for flag_cut in (False, True):
+                for flag_resize in (False, True):
+                    for flag_remove_audio in (False, True):
+                        for flag_speed in (False, True):
+                            for flag_effect in (False, True):
+                                auto_outputs.add(
+                                    os.path.abspath(
+                                        self._default_edit_output_path(
+                                            source_video=source_path,
+                                            enable_cut=flag_cut,
+                                            enable_resize=flag_resize,
+                                            remove_audio=flag_remove_audio,
+                                            enable_speed=flag_speed,
+                                            enable_audio_effect=flag_effect,
+                                        )
+                                    )
+                                )
             if not current_output or os.path.abspath(current_output) in auto_outputs:
                 self.edit_output_path_edit.setText(
                     self._default_edit_output_path(
                         source_video=source_path,
                         enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
                         enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
+                        remove_audio=self._is_edit_remove_audio_enabled(),
+                        enable_speed=self._is_edit_speed_enabled(),
+                        enable_audio_effect=self._is_edit_audio_effect_enabled(),
                     )
                 )
 
@@ -2141,11 +2232,22 @@ class MainWindow(QMainWindow):
             return None, "Gecerli kesim araligi bulunamadi."
         return merged_segments, None
 
-    def _default_edit_output_path(self, source_video: str, enable_cut: bool, enable_resize: bool) -> str:
+    def _default_edit_output_path(
+        self,
+        source_video: str,
+        enable_cut: bool,
+        enable_resize: bool,
+        remove_audio: bool = False,
+        enable_speed: bool = False,
+        enable_audio_effect: bool = False,
+    ) -> str:
         source_dir = os.path.dirname(source_video)
         source_name = os.path.splitext(os.path.basename(source_video))[0].strip()
         if not source_name:
             source_name = "video"
+
+        if remove_audio or enable_speed or enable_audio_effect:
+            return os.path.join(source_dir, f"{source_name}_edited.mp4")
 
         suffix = "_edited"
         if enable_cut and enable_resize:
@@ -2177,6 +2279,36 @@ class MainWindow(QMainWindow):
         if abs(rounded - round(rounded)) < 0.0001:
             return str(int(round(rounded)))
         return f"{rounded:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _closest_p_label(height: int) -> str:
+        candidates = [2160, 1440, 1080, 720, 480]
+        target = min(candidates, key=lambda item: abs(int(height) - int(item)))
+        return f"{int(target)}p"
+
+    @staticmethod
+    def _k_label(width: int) -> Optional[str]:
+        if int(width) >= 3840:
+            return "4K"
+        if int(width) >= 2560:
+            return "2K"
+        return None
+
+    def _resolution_class_text(self, width: int, height: int) -> str:
+        labels: list[str] = [self._closest_p_label(height)]
+        k_label = self._k_label(width)
+        if k_label is not None:
+            labels.append(k_label)
+        return ", ".join(labels)
+
+    def _is_edit_remove_audio_enabled(self) -> bool:
+        return hasattr(self, "edit_remove_audio_checkbox") and self.edit_remove_audio_checkbox.isChecked()
+
+    def _is_edit_speed_enabled(self) -> bool:
+        return hasattr(self, "edit_speed_enabled_checkbox") and self.edit_speed_enabled_checkbox.isChecked()
+
+    def _is_edit_audio_effect_enabled(self) -> bool:
+        return hasattr(self, "edit_audio_effect_enabled_checkbox") and self.edit_audio_effect_enabled_checkbox.isChecked()
 
     def _refresh_edit_resolution_options(self) -> None:
         if not hasattr(self, "edit_target_resolution_combo"):
@@ -2230,7 +2362,8 @@ class MainWindow(QMainWindow):
                 self.edit_current_specs_label.setText("Mevcut: -")
             else:
                 fps_text = "-" if source_fps <= 0.0 else f"{self._format_edit_fps_value(source_fps)} FPS"
-                self.edit_current_specs_label.setText(f"Mevcut: {source_width}x{source_height} | {fps_text}")
+                class_text = self._resolution_class_text(source_width, source_height)
+                self.edit_current_specs_label.setText(f"Mevcut: {source_width}x{source_height} ({class_text}) | {fps_text}")
 
     def _selected_resize_targets(self) -> Tuple[Optional[tuple[int, int]], Optional[float]]:
         target_resolution: Optional[tuple[int, int]] = None
@@ -2279,6 +2412,51 @@ class MainWindow(QMainWindow):
 
         return target_resolution, target_fps
 
+    def _selected_speed_factor(self) -> Optional[float]:
+        if not hasattr(self, "edit_speed_combo"):
+            return None
+        raw_data = self.edit_speed_combo.currentData()
+        if raw_data is None:
+            return None
+        try:
+            value = float(raw_data)
+        except (TypeError, ValueError):
+            return None
+        if value <= 0.0:
+            return None
+        return value
+
+    def _effective_speed_factor(self) -> Optional[float]:
+        if not self._is_edit_speed_enabled():
+            return None
+        value = self._selected_speed_factor()
+        if value is None:
+            return None
+        if abs(value - 1.0) < 0.001:
+            return None
+        return value
+
+    def _selected_audio_effect_preset(self) -> Optional[str]:
+        if not hasattr(self, "edit_audio_effect_combo"):
+            return None
+        raw_data = self.edit_audio_effect_combo.currentData()
+        if raw_data is None:
+            return None
+        value = str(raw_data).strip()
+        if not value:
+            return None
+        return value
+
+    def _effective_audio_effect_preset(self) -> Optional[str]:
+        if not self._is_edit_audio_effect_enabled():
+            return None
+        value = self._selected_audio_effect_preset()
+        if value is None:
+            return None
+        if value == "none":
+            return None
+        return value
+
     def _update_edit_segments_label(self) -> None:
         if not hasattr(self, "edit_segments_label"):
             return
@@ -2307,6 +2485,9 @@ class MainWindow(QMainWindow):
         output_path = self.edit_output_path_edit.text().strip()
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
+        remove_audio_enabled = self._is_edit_remove_audio_enabled()
+        speed_enabled = self._is_edit_speed_enabled()
+        audio_effect_enabled = self._is_edit_audio_effect_enabled()
 
         has_segments = bool(self.edit_segments)
         cut_ready = True
@@ -2317,9 +2498,21 @@ class MainWindow(QMainWindow):
 
         target_resolution, target_fps = self._effective_resize_targets()
         resize_ready = (not resize_enabled) or (target_resolution is not None or target_fps is not None)
+        speed_factor = self._selected_speed_factor()
+        speed_ready = (not speed_enabled) or (speed_factor is not None)
+        effective_speed_factor = self._effective_speed_factor()
+        effect_preset = self._selected_audio_effect_preset()
+        effect_ready = (not audio_effect_enabled) or (effect_preset is not None)
+        effective_effect_preset = self._effective_audio_effect_preset()
 
-        has_selected_operation = cut_enabled or resize_enabled
-        has_effective_operation = (cut_enabled and has_segments) or (resize_enabled and (target_resolution is not None or target_fps is not None))
+        has_selected_operation = cut_enabled or resize_enabled or remove_audio_enabled or speed_enabled or audio_effect_enabled
+        has_effective_operation = (
+            (cut_enabled and has_segments)
+            or (resize_enabled and (target_resolution is not None or target_fps is not None))
+            or remove_audio_enabled
+            or (effective_speed_factor is not None)
+            or (effective_effect_preset is not None)
+        )
 
         analysis_running = self._is_event_detection_running() or self._is_color_analysis_running()
         can_run = (
@@ -2329,6 +2522,8 @@ class MainWindow(QMainWindow):
             and has_effective_operation
             and cut_ready
             and resize_ready
+            and speed_ready
+            and effect_ready
             and (not is_running)
             and (not analysis_running)
         )
@@ -2344,6 +2539,16 @@ class MainWindow(QMainWindow):
             self.edit_target_resolution_combo.setEnabled((not is_running) and resize_enabled)
         if hasattr(self, "edit_target_fps_combo"):
             self.edit_target_fps_combo.setEnabled((not is_running) and resize_enabled)
+        if hasattr(self, "edit_remove_audio_checkbox"):
+            self.edit_remove_audio_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_speed_enabled_checkbox"):
+            self.edit_speed_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_speed_combo"):
+            self.edit_speed_combo.setEnabled((not is_running) and speed_enabled)
+        if hasattr(self, "edit_audio_effect_enabled_checkbox"):
+            self.edit_audio_effect_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_audio_effect_combo"):
+            self.edit_audio_effect_combo.setEnabled((not is_running) and audio_effect_enabled)
         if is_running:
             if self._video_edit_cancel_requested:
                 self.edit_run_button.setText("Edit Islemi Durduruluyor...")
@@ -2404,7 +2609,11 @@ class MainWindow(QMainWindow):
 
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
-        if not cut_enabled and not resize_enabled:
+        remove_audio = self._is_edit_remove_audio_enabled()
+        speed_enabled = self._is_edit_speed_enabled()
+        audio_effect_enabled = self._is_edit_audio_effect_enabled()
+
+        if not (cut_enabled or resize_enabled or remove_audio or speed_enabled or audio_effect_enabled):
             QMessageBox.warning(self, "Edit", "En az bir islem icin enable secilmelidir.")
             return
 
@@ -2426,12 +2635,34 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Edit", "Cozunurluk/FPS icin en az bir dusurme secilmelidir.")
                 return
 
+        speed_factor = self._effective_speed_factor()
+        if speed_enabled and speed_factor is None:
+            QMessageBox.warning(self, "Edit", "Video hizi icin 1.0x disinda bir deger secilmelidir.")
+            return
+
+        audio_effect_preset = self._effective_audio_effect_preset()
+        if audio_effect_enabled and audio_effect_preset is None:
+            QMessageBox.warning(self, "Edit", "Ses efekti icin 'Yok' disinda bir secim yapilmalidir.")
+            return
+
+        cut_effective = cut_enabled and bool(self.edit_segments)
+        resize_effective = resize_enabled and (target_resolution is not None or target_fps is not None)
+        speed_effective = speed_factor is not None
+        effect_effective = audio_effect_preset is not None
+        has_effective_operation = cut_effective or resize_effective or remove_audio or speed_effective or effect_effective
+        if not has_effective_operation:
+            QMessageBox.warning(self, "Edit", "Secilen ayarlarda uygulanacak bir islem bulunamadi.")
+            return
+
         output_path = self.edit_output_path_edit.text().strip()
         if not output_path:
             output_path = self._default_edit_output_path(
                 source_video=self.video_meta.source_video,
                 enable_cut=cut_enabled,
                 enable_resize=resize_enabled,
+                remove_audio=remove_audio,
+                enable_speed=speed_enabled,
+                enable_audio_effect=audio_effect_enabled,
             )
             self.edit_output_path_edit.setText(output_path)
         output_path = output_path.strip()
@@ -2489,11 +2720,41 @@ class MainWindow(QMainWindow):
         else:
             self._append_edit_log("Cozunurluk/FPS adimi devre disi.")
 
+        if remove_audio:
+            self._append_edit_log("Ses adimi: Orijinal ses silinecek.")
+        else:
+            self._append_edit_log("Ses adimi: Orijinal ses korunacak.")
+
+        if speed_enabled and speed_factor is not None:
+            self._append_edit_log(f"Hedef hiz: {speed_factor:.2f}x")
+        else:
+            self._append_edit_log("Video hizi adimi devre disi.")
+
+        if audio_effect_enabled and audio_effect_preset is not None:
+            effect_display_name = audio_effect_preset
+            if hasattr(self, "edit_audio_effect_combo"):
+                combo_text = self.edit_audio_effect_combo.currentText().strip()
+                if combo_text:
+                    effect_display_name = combo_text
+            self._append_edit_log(f"Ses efekti: {effect_display_name}")
+            if remove_audio:
+                self._append_edit_log("Efekt modu: Bagimsiz efekt sesi uretilecek.")
+            else:
+                self._append_edit_log("Efekt modu: Orijinal ses + efekt sesi mix.")
+        else:
+            self._append_edit_log("Ses efekti adimi devre disi.")
+
         planned_steps: list[str] = []
-        if cut_enabled:
+        if cut_effective:
             planned_steps.append("Cut")
-        if resize_enabled:
+        if resize_effective:
             planned_steps.append("Cozunurluk/FPS")
+        if remove_audio:
+            planned_steps.append("Ses Silme")
+        if speed_effective:
+            planned_steps.append("Video Hizi")
+        if effect_effective:
+            planned_steps.append("Ses Efekti")
         self._append_edit_log(f"Planlanan adimlar: {' -> '.join(planned_steps)}")
         self._append_edit_log(f"FFmpeg: {ffmpeg_path}")
         self._append_edit_log(f"Cikti: {output_path}")
@@ -2508,11 +2769,16 @@ class MainWindow(QMainWindow):
             cut_segments=self.edit_segments,
             preset=preset,
             crf=crf_value,
-            enable_cut=cut_enabled,
-            enable_resize=resize_enabled,
+            enable_cut=cut_effective,
+            enable_resize=resize_effective,
             target_width=target_resolution[0] if target_resolution is not None else None,
             target_height=target_resolution[1] if target_resolution is not None else None,
             target_fps=target_fps,
+            remove_audio=remove_audio,
+            enable_speed=speed_effective,
+            speed_factor=speed_factor,
+            enable_audio_effect=effect_effective,
+            audio_effect_preset=audio_effect_preset,
         )
         self.edit_worker.moveToThread(self.edit_thread)
 
