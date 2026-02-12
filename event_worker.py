@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from collections import deque
 from typing import Any, Mapping, Optional, Sequence
 
@@ -130,6 +131,10 @@ class VideoEditWorker(QObject):
         preset: str = "slow",
         crf: int = 0,
         enable_cut: bool = True,
+        enable_resize: bool = False,
+        target_width: Optional[int] = None,
+        target_height: Optional[int] = None,
+        target_fps: Optional[float] = None,
     ) -> None:
         super().__init__()
         self.ffmpeg_path = str(ffmpeg_path)
@@ -139,6 +144,10 @@ class VideoEditWorker(QObject):
         self.preset = str(preset).strip() or "slow"
         self.crf = max(0, min(51, int(crf)))
         self.enable_cut = bool(enable_cut)
+        self.enable_resize = bool(enable_resize)
+        self.target_width = int(target_width) if target_width is not None else None
+        self.target_height = int(target_height) if target_height is not None else None
+        self.target_fps = float(target_fps) if target_fps is not None else None
         self._cancel_requested = False
         self._process: Optional[subprocess.Popen[str]] = None
 
@@ -167,10 +176,8 @@ class VideoEditWorker(QObject):
             self.finished.emit()
 
     def _run_ffmpeg_edit(self) -> dict:
-        if not self.enable_cut:
-            raise RuntimeError("Bu surumde yalnizca cut islemi destekleniyor.")
-        if not self.cut_segments:
-            raise RuntimeError("Cut segment listesi bos.")
+        if not self.enable_cut and not self.enable_resize:
+            raise RuntimeError("En az bir edit islemi secilmelidir.")
         if not os.path.isfile(self.input_path):
             raise RuntimeError(f"Girdi videosu bulunamadi: {self.input_path}")
 
@@ -178,96 +185,95 @@ class VideoEditWorker(QObject):
         if ffmpeg_binary is None:
             raise RuntimeError("FFmpeg bulunamadi.")
 
-        has_audio = self._detect_audio_stream(ffmpeg_binary, self.input_path)
-        total_duration = sum(max(0.0, end_seconds - start_seconds) for start_seconds, end_seconds in self.cut_segments)
-        if total_duration <= 0.0:
-            raise RuntimeError("Toplam kesim suresi sifir veya gecersiz.")
+        cut_duration = sum(max(0.0, end_seconds - start_seconds) for start_seconds, end_seconds in self.cut_segments)
+        if self.enable_cut:
+            if not self.cut_segments:
+                raise RuntimeError("Cut segment listesi bos.")
+            if cut_duration <= 0.0:
+                raise RuntimeError("Toplam kesim suresi sifir veya gecersiz.")
 
-        filter_complex = self._build_filter_complex(self.cut_segments, has_audio=has_audio)
-        command = [
-            ffmpeg_binary,
-            "-y",
-            "-hide_banner",
-            "-nostats",
-            "-loglevel",
-            "error",
-            "-progress",
-            "pipe:1",
-            "-i",
-            self.input_path,
-            "-filter_complex",
-            filter_complex,
-            "-map",
-            "[vout]",
-            "-c:v",
-            "libx264",
-            "-preset",
-            self.preset,
-            "-crf",
-            str(self.crf),
-        ]
-        if has_audio:
-            command.extend(["-map", "[aout]", "-c:a", "alac"])
-        command.extend(["-movflags", "+faststart", self.output_path])
+        if self.enable_resize:
+            if (self.target_width is None) != (self.target_height is None):
+                raise RuntimeError("Cozunurluk icin genislik/yukseklik birlikte verilmelidir.")
+            if self.target_width is not None and self.target_width <= 0:
+                raise RuntimeError("Hedef genislik pozitif olmali.")
+            if self.target_height is not None and self.target_height <= 0:
+                raise RuntimeError("Hedef yukseklik pozitif olmali.")
+            if self.target_fps is not None and self.target_fps <= 0.0:
+                raise RuntimeError("Hedef FPS pozitif olmali.")
+            if self.target_width is None and self.target_fps is None:
+                raise RuntimeError("Cozunurluk/FPS adimi icin en az bir hedef secilmelidir.")
 
-        self.progress.emit(0, "FFmpeg islemi baslatiliyor...")
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-        self._process = process
+        operation_names: list[str] = []
+        if self.enable_cut:
+            operation_names.append("cut")
+        if self.enable_resize:
+            operation_names.append("resize")
 
-        last_percent = 0
-        error_tail: deque[str] = deque(maxlen=30)
+        input_path = self.input_path
+        output_path = self.output_path
+        has_audio = self._detect_audio_stream(ffmpeg_binary, input_path)
+        estimated_duration = self._probe_duration_seconds(ffmpeg_binary, input_path)
+
+        temp_files: list[str] = []
+        completed_ops: list[str] = []
         try:
-            if process.stdout is not None:
-                for raw_line in process.stdout:
-                    if self._cancel_requested:
-                        self.cancel()
-                        break
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    if line.startswith("out_time_ms="):
-                        value_text = line.split("=", 1)[1].strip()
-                        try:
-                            out_time_ms = int(value_text)
-                        except ValueError:
-                            continue
-                        percent = int((float(out_time_ms) / float(total_duration * 1_000_000.0)) * 100.0)
-                        percent = max(1, min(99, percent))
-                        if percent > last_percent:
-                            last_percent = percent
-                            self.progress.emit(percent, "")
-                        continue
-                    if line == "progress=end":
-                        last_percent = 100
-                        self.progress.emit(100, "FFmpeg islemi tamamlandi.")
-                        continue
-                    if "=" not in line:
-                        error_tail.append(line)
-            return_code = process.wait()
-            if self._cancel_requested:
-                raise RuntimeError("Video edit islemi durduruldu.")
-            if return_code != 0:
-                summary = "\n".join(error_tail).strip()
-                if not summary:
-                    summary = f"FFmpeg cikis kodu: {return_code}"
-                raise RuntimeError(f"FFmpeg islemi basarisiz:\n{summary}")
+            step_count = len(operation_names)
+            for index, operation_name in enumerate(operation_names):
+                is_last_step = index == (step_count - 1)
+                step_output = output_path if is_last_step else self._create_temp_output_path(temp_files)
+
+                if operation_name == "cut":
+                    command = self._build_cut_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=has_audio,
+                    )
+                    step_label = "Cut"
+                    step_duration = cut_duration
+                else:
+                    command = self._build_resize_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=has_audio,
+                        target_width=self.target_width,
+                        target_height=self.target_height,
+                        target_fps=self.target_fps,
+                    )
+                    step_label = "Cozunurluk/FPS"
+                    step_duration = estimated_duration
+
+                self._run_ffmpeg_step(
+                    command=command,
+                    step_index=index,
+                    step_count=step_count,
+                    step_label=step_label,
+                    expected_duration=step_duration,
+                )
+                completed_ops.append(operation_name)
+
+                input_path = step_output
+                has_audio = self._detect_audio_stream(ffmpeg_binary, input_path)
+                if operation_name == "cut":
+                    estimated_duration = cut_duration
+
+            final_duration = self._probe_duration_seconds(ffmpeg_binary, self.output_path)
+            if final_duration is None:
+                final_duration = estimated_duration if estimated_duration is not None else 0.0
         finally:
             self._process = None
+            for temp_path in temp_files:
+                self._safe_remove_file(temp_path)
 
         self.progress.emit(100, "Video edit tamamlandi.")
         return {
             "output_path": self.output_path,
             "segments": len(self.cut_segments),
             "has_audio": bool(has_audio),
-            "duration_seconds": round(total_duration, 3),
+            "duration_seconds": round(float(final_duration), 3),
+            "operations": completed_ops,
         }
 
     @staticmethod
@@ -302,6 +308,211 @@ class VideoEditWorker(QObject):
             parts.append(f"{audio_concat_inputs}concat=n={segment_count}:v=0:a=1[aout]")
 
         return ";".join(parts)
+
+    def _build_cut_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+        has_audio: bool,
+    ) -> list[str]:
+        filter_complex = self._build_filter_complex(self.cut_segments, has_audio=has_audio)
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[vout]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            self.preset,
+            "-crf",
+            str(self.crf),
+        ]
+        if has_audio:
+            command.extend(["-map", "[aout]", "-c:a", "alac"])
+        command.extend(["-movflags", "+faststart", output_path])
+        return command
+
+    def _build_resize_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+        has_audio: bool,
+        target_width: Optional[int],
+        target_height: Optional[int],
+        target_fps: Optional[float],
+    ) -> list[str]:
+        filters: list[str] = []
+        if target_width is not None and target_height is not None:
+            filters.append(f"scale={int(target_width)}:{int(target_height)}:flags=lanczos")
+        if target_fps is not None:
+            filters.append(f"fps=fps={float(target_fps):.6f}")
+        if not filters:
+            raise RuntimeError("Cozunurluk/FPS adimi icin filtre olusturulamadi.")
+
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+            "-vf",
+            ",".join(filters),
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            self.preset,
+            "-crf",
+            str(self.crf),
+        ]
+        if has_audio:
+            command.extend(["-map", "0:a?", "-c:a", "alac"])
+        command.extend(["-movflags", "+faststart", output_path])
+        return command
+
+    def _run_ffmpeg_step(
+        self,
+        command: Sequence[str],
+        step_index: int,
+        step_count: int,
+        step_label: str,
+        expected_duration: Optional[float],
+    ) -> None:
+        start_percent = int(round((float(step_index) / float(max(1, step_count))) * 100.0))
+        end_percent = int(round((float(step_index + 1) / float(max(1, step_count))) * 100.0))
+        step_no = step_index + 1
+
+        self.progress.emit(start_percent, f"{step_no}/{step_count} {step_label} basladi.")
+        process = subprocess.Popen(
+            list(command),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        self._process = process
+
+        last_percent = start_percent
+        duration_seconds = float(expected_duration) if expected_duration is not None else 0.0
+        has_duration = duration_seconds > 0.0
+        error_tail: deque[str] = deque(maxlen=30)
+
+        try:
+            if process.stdout is not None:
+                for raw_line in process.stdout:
+                    if self._cancel_requested:
+                        self.cancel()
+                        break
+
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+
+                    if has_duration and line.startswith("out_time_ms="):
+                        value_text = line.split("=", 1)[1].strip()
+                        try:
+                            out_time_ms = int(value_text)
+                        except ValueError:
+                            continue
+                        ratio = float(out_time_ms) / float(duration_seconds * 1_000_000.0)
+                        ratio = max(0.0, min(1.0, ratio))
+                        dynamic = start_percent + int(round(ratio * float(max(0, end_percent - start_percent - 1))))
+                        dynamic = max(start_percent, min(end_percent - 1, dynamic))
+                        if dynamic > last_percent:
+                            last_percent = dynamic
+                            self.progress.emit(dynamic, "")
+                        continue
+
+                    if "=" not in line:
+                        error_tail.append(line)
+
+            return_code = process.wait()
+            if self._cancel_requested:
+                raise RuntimeError("Video edit islemi durduruldu.")
+            if return_code != 0:
+                summary = "\n".join(error_tail).strip()
+                if not summary:
+                    summary = f"FFmpeg cikis kodu: {return_code}"
+                raise RuntimeError(f"FFmpeg islemi basarisiz:\n{summary}")
+        finally:
+            self._process = None
+
+        self.progress.emit(end_percent, f"{step_no}/{step_count} {step_label} tamamlandi.")
+
+    @staticmethod
+    def _create_temp_output_path(bucket: list[str]) -> str:
+        fd, temp_path = tempfile.mkstemp(prefix="video_edit_step_", suffix=".mp4")
+        os.close(fd)
+        bucket.append(temp_path)
+        return temp_path
+
+    def _probe_duration_seconds(self, ffmpeg_binary: str, input_path: str) -> Optional[float]:
+        ffprobe_binary = self._resolve_ffprobe_binary(ffmpeg_binary)
+        if ffprobe_binary is None:
+            return None
+
+        command = [
+            ffprobe_binary,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            input_path,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=8,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+        if completed.returncode != 0:
+            return None
+
+        try:
+            value = float((completed.stdout or "").strip())
+        except ValueError:
+            return None
+        if value <= 0.0:
+            return None
+        return value
+
+    @staticmethod
+    def _safe_remove_file(path: str) -> None:
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
 
     def _detect_audio_stream(self, ffmpeg_binary: str, input_path: str) -> bool:
         ffprobe_binary = self._resolve_ffprobe_binary(ffmpeg_binary)
