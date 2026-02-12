@@ -1166,7 +1166,7 @@ class MainWindow(QMainWindow):
 
     def _screen_title(self, screen: str) -> str:
         if screen == "startup":
-            return "Baslangic"
+            return ""
         if screen == "video":
             return "Video Secimi"
         if screen == "roi":
