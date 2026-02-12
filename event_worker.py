@@ -127,8 +127,8 @@ class VideoEditWorker(QObject):
         input_path: str,
         output_path: str,
         cut_segments: Sequence[tuple[float, float]],
-        preset: str = "medium",
-        crf: int = 18,
+        preset: str = "slow",
+        crf: int = 0,
         enable_cut: bool = True,
     ) -> None:
         super().__init__()
@@ -136,7 +136,7 @@ class VideoEditWorker(QObject):
         self.input_path = str(input_path)
         self.output_path = str(output_path)
         self.cut_segments = [(float(start), float(end)) for start, end in cut_segments]
-        self.preset = str(preset).strip() or "medium"
+        self.preset = str(preset).strip() or "slow"
         self.crf = max(0, min(51, int(crf)))
         self.enable_cut = bool(enable_cut)
         self._cancel_requested = False
@@ -207,7 +207,7 @@ class VideoEditWorker(QObject):
             str(self.crf),
         ]
         if has_audio:
-            command.extend(["-map", "[aout]", "-c:a", "aac"])
+            command.extend(["-map", "[aout]", "-c:a", "alac"])
         command.extend(["-movflags", "+faststart", self.output_path])
 
         self.progress.emit(0, "FFmpeg islemi baslatiliyor...")

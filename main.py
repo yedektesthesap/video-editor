@@ -1636,12 +1636,12 @@ class MainWindow(QMainWindow):
         quality_layout.addWidget(QLabel("Preset:"))
         self.edit_preset_combo = QComboBox()
         self.edit_preset_combo.addItems(["ultrafast", "fast", "medium", "slow"])
-        self.edit_preset_combo.setCurrentText("medium")
+        self.edit_preset_combo.setCurrentText("slow")
         quality_layout.addWidget(self.edit_preset_combo)
         quality_layout.addWidget(QLabel("CRF:"))
         self.edit_crf_spin = QSpinBox()
         self.edit_crf_spin.setRange(0, 51)
-        self.edit_crf_spin.setValue(18)
+        self.edit_crf_spin.setValue(0)
         quality_layout.addWidget(self.edit_crf_spin)
         quality_layout.addStretch(1)
 
@@ -2195,7 +2195,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "FFmpeg", "FFmpeg yolu bulunamadi. Islem baslatilmadi.")
             return
 
-        preset = self.edit_preset_combo.currentText().strip() or "medium"
+        preset = self.edit_preset_combo.currentText().strip() or "slow"
         crf_value = int(self.edit_crf_spin.value())
 
         self.edit_progress.setValue(0)
