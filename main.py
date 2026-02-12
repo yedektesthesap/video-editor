@@ -65,6 +65,14 @@ EVENT_COL_END = 5
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
+EDIT_RESOLUTION_PRESETS: list[tuple[str, tuple[int, int]]] = [
+    ("2160p (3840x2160)", (3840, 2160)),
+    ("1440p (2560x1440)", (2560, 1440)),
+    ("1080p (1920x1080)", (1920, 1080)),
+    ("720p (1280x720)", (1280, 720)),
+    ("480p (854x480)", (854, 480)),
+]
+EDIT_FPS_PRESETS: list[float] = [60.0, 50.0, 30.0, 25.0, 24.0]
 
 SOURCE_START_SENSITIVITY_PRESETS: dict[str, dict[str, float]] = {
     "Hassas": {
@@ -1644,7 +1652,7 @@ class MainWindow(QMainWindow):
 
         self.edit_cut_enabled_checkbox = QCheckBox("Enable Cut")
         self.edit_cut_enabled_checkbox.setChecked(True)
-        self.edit_cut_enabled_checkbox.stateChanged.connect(self._update_edit_controls)
+        self.edit_cut_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
 
         self.edit_segments_label = QLabel("Hazir segment: -")
         self.edit_segments_label.setStyleSheet("color: #9aa4b7;")
@@ -1667,6 +1675,35 @@ class MainWindow(QMainWindow):
         cut_layout.addWidget(self.edit_segments_label)
         cut_layout.addLayout(quality_layout)
         top_layout.addWidget(self.edit_cut_group)
+
+        self.edit_resize_group = QGroupBox("Cozunurluk Ayarlari")
+        resize_layout = QVBoxLayout(self.edit_resize_group)
+        resize_layout.setContentsMargins(8, 8, 8, 8)
+        resize_layout.setSpacing(6)
+
+        self.edit_resize_enabled_checkbox = QCheckBox("Enable Cozunurluk/FPS")
+        self.edit_resize_enabled_checkbox.setChecked(False)
+        self.edit_resize_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+
+        self.edit_current_specs_label = QLabel("Mevcut: -")
+        self.edit_current_specs_label.setStyleSheet("color: #9aa4b7;")
+
+        resize_target_layout = QHBoxLayout()
+        resize_target_layout.setContentsMargins(0, 0, 0, 0)
+        resize_target_layout.addWidget(QLabel("Hedef Cozunurluk:"))
+        self.edit_target_resolution_combo = QComboBox()
+        self.edit_target_resolution_combo.currentIndexChanged.connect(self._update_edit_controls)
+        resize_target_layout.addWidget(self.edit_target_resolution_combo)
+        resize_target_layout.addWidget(QLabel("Hedef FPS:"))
+        self.edit_target_fps_combo = QComboBox()
+        self.edit_target_fps_combo.currentIndexChanged.connect(self._update_edit_controls)
+        resize_target_layout.addWidget(self.edit_target_fps_combo)
+        resize_target_layout.addStretch(1)
+
+        resize_layout.addWidget(self.edit_resize_enabled_checkbox)
+        resize_layout.addWidget(self.edit_current_specs_label)
+        resize_layout.addLayout(resize_target_layout)
+        top_layout.addWidget(self.edit_resize_group)
 
         bottom_content = QWidget(container)
         bottom_layout = QVBoxLayout(bottom_content)
@@ -1694,6 +1731,7 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(top_content, stretch=3, alignment=Qt.AlignmentFlag.AlignTop)
         root_layout.addWidget(bottom_content, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
+        self._refresh_edit_resolution_options()
         self._update_edit_controls()
 
     def _setup_shortcuts(self) -> None:
@@ -1980,18 +2018,32 @@ class MainWindow(QMainWindow):
             return
 
         segments, error = self._build_merged_cut_segments()
-        if error is not None or segments is None:
-            QMessageBox.warning(self, "Edit", error or "Kesim segmentleri hazirlanamadi.")
-            return
+        if error is None and segments is not None:
+            self.edit_segments = segments
+            self.edit_cut_enabled_checkbox.setChecked(True)
+        else:
+            self.edit_segments = []
+            self.edit_cut_enabled_checkbox.setChecked(False)
 
-        self.edit_segments = segments
         source_path = self.video_meta.source_video
-        self.edit_output_path_edit.setText(self._default_cut_output_path(source_path))
         self._update_edit_video_label()
+        self._refresh_edit_resolution_options()
         self._update_edit_segments_label()
+        self.edit_output_path_edit.setText(
+            self._default_edit_output_path(
+                source_video=source_path,
+                enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
+                enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
+            )
+        )
         self.edit_progress.setValue(0)
         self.edit_log.clear()
-        self._append_edit_log(self._format_segments_summary(self.edit_segments))
+        if self.edit_segments:
+            self._append_edit_log(self._format_segments_summary(self.edit_segments))
+        else:
+            self._append_edit_log("Cut adimi varsayilan olarak pasif baslatildi (event start/end eksik).")
+            if error:
+                self._append_edit_log(f"Cut nedeni: {error}")
         self._update_edit_controls()
         self.switch_to_edit_tab()
 
@@ -1999,7 +2051,13 @@ class MainWindow(QMainWindow):
         if self.video_meta is None:
             QMessageBox.warning(self, "Edit", "Once bir video acin.")
             return
-        base_output = self.edit_output_path_edit.text().strip() or self._default_cut_output_path(self.video_meta.source_video)
+        base_output = self.edit_output_path_edit.text().strip()
+        if not base_output:
+            base_output = self._default_edit_output_path(
+                source_video=self.video_meta.source_video,
+                enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
+                enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
+            )
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Cikti Video Kaydet",
@@ -2018,6 +2076,27 @@ class MainWindow(QMainWindow):
             self.stop_video_edit()
             return
         self.start_video_edit()
+
+    def _on_edit_operation_checkbox_changed(self, *_args: object) -> None:
+        if self.video_meta is not None and os.path.isfile(self.video_meta.source_video):
+            source_path = self.video_meta.source_video
+            current_output = self.edit_output_path_edit.text().strip()
+            auto_outputs = {
+                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=False, enable_resize=False)),
+                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=True, enable_resize=False)),
+                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=False, enable_resize=True)),
+                os.path.abspath(self._default_edit_output_path(source_path, enable_cut=True, enable_resize=True)),
+            }
+            if not current_output or os.path.abspath(current_output) in auto_outputs:
+                self.edit_output_path_edit.setText(
+                    self._default_edit_output_path(
+                        source_video=source_path,
+                        enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
+                        enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
+                    )
+                )
+
+        self._update_edit_controls()
 
     def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
         if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
@@ -2059,12 +2138,21 @@ class MainWindow(QMainWindow):
             return None, "Gecerli kesim araligi bulunamadi."
         return merged_segments, None
 
-    def _default_cut_output_path(self, source_video: str) -> str:
+    def _default_edit_output_path(self, source_video: str, enable_cut: bool, enable_resize: bool) -> str:
         source_dir = os.path.dirname(source_video)
         source_name = os.path.splitext(os.path.basename(source_video))[0].strip()
         if not source_name:
             source_name = "video"
-        return os.path.join(source_dir, f"{source_name}_cut.mp4")
+
+        suffix = "_edited"
+        if enable_cut and enable_resize:
+            suffix = "_cut_resized"
+        elif enable_cut:
+            suffix = "_cut"
+        elif enable_resize:
+            suffix = "_resized"
+
+        return os.path.join(source_dir, f"{source_name}{suffix}.mp4")
 
     def _format_segments_summary(self, segments: list[tuple[float, float]]) -> str:
         total = sum(max(0.0, end_seconds - start_seconds) for start_seconds, end_seconds in segments)
@@ -2075,8 +2163,118 @@ class MainWindow(QMainWindow):
             return
         if self.video_meta is None:
             self.edit_source_video_label.setText("Kaynak video: -")
+            self._refresh_edit_resolution_options()
             return
         self.edit_source_video_label.setText(f"Kaynak video: {self.video_meta.source_video}")
+        self._refresh_edit_resolution_options()
+
+    @staticmethod
+    def _format_edit_fps_value(value: float) -> str:
+        rounded = round(float(value), 2)
+        if abs(rounded - round(rounded)) < 0.0001:
+            return str(int(round(rounded)))
+        return f"{rounded:.2f}".rstrip("0").rstrip(".")
+
+    def _refresh_edit_resolution_options(self) -> None:
+        if not hasattr(self, "edit_target_resolution_combo"):
+            return
+
+        current_resolution = self.edit_target_resolution_combo.currentData()
+        current_fps = self.edit_target_fps_combo.currentData()
+
+        source_width = 0
+        source_height = 0
+        source_fps = 0.0
+        if self.video_meta is not None:
+            source_width = max(0, int(self.video_meta.width))
+            source_height = max(0, int(self.video_meta.height))
+            source_fps = max(0.0, float(self.video_meta.fps))
+
+        self.edit_target_resolution_combo.blockSignals(True)
+        self.edit_target_fps_combo.blockSignals(True)
+        try:
+            self.edit_target_resolution_combo.clear()
+            self.edit_target_resolution_combo.addItem("Orijinal", None)
+            if self.video_meta is not None:
+                for label, (target_w, target_h) in EDIT_RESOLUTION_PRESETS:
+                    if source_width > 0 and source_height > 0 and (target_w > source_width or target_h > source_height):
+                        continue
+                    self.edit_target_resolution_combo.addItem(label, (int(target_w), int(target_h)))
+
+            self.edit_target_fps_combo.clear()
+            self.edit_target_fps_combo.addItem("Orijinal", None)
+            if self.video_meta is not None:
+                for fps_value in EDIT_FPS_PRESETS:
+                    if source_fps > 0.0 and fps_value > (source_fps + 0.001):
+                        continue
+                    self.edit_target_fps_combo.addItem(f"{self._format_edit_fps_value(fps_value)} FPS", float(fps_value))
+
+            def restore_combo_data(combo: QComboBox, data: object) -> None:
+                for idx in range(combo.count()):
+                    if combo.itemData(idx) == data:
+                        combo.setCurrentIndex(idx)
+                        return
+                combo.setCurrentIndex(0)
+
+            restore_combo_data(self.edit_target_resolution_combo, current_resolution)
+            restore_combo_data(self.edit_target_fps_combo, current_fps)
+        finally:
+            self.edit_target_resolution_combo.blockSignals(False)
+            self.edit_target_fps_combo.blockSignals(False)
+
+        if hasattr(self, "edit_current_specs_label"):
+            if source_width <= 0 or source_height <= 0:
+                self.edit_current_specs_label.setText("Mevcut: -")
+            else:
+                fps_text = "-" if source_fps <= 0.0 else f"{self._format_edit_fps_value(source_fps)} FPS"
+                self.edit_current_specs_label.setText(f"Mevcut: {source_width}x{source_height} | {fps_text}")
+
+    def _selected_resize_targets(self) -> Tuple[Optional[tuple[int, int]], Optional[float]]:
+        target_resolution: Optional[tuple[int, int]] = None
+        target_fps: Optional[float] = None
+
+        resolution_data = self.edit_target_resolution_combo.currentData() if hasattr(self, "edit_target_resolution_combo") else None
+        if isinstance(resolution_data, (tuple, list)) and len(resolution_data) == 2:
+            try:
+                target_w = int(resolution_data[0])
+                target_h = int(resolution_data[1])
+                if target_w > 0 and target_h > 0:
+                    target_resolution = (target_w, target_h)
+            except (TypeError, ValueError):
+                target_resolution = None
+
+        fps_data = self.edit_target_fps_combo.currentData() if hasattr(self, "edit_target_fps_combo") else None
+        if fps_data is not None:
+            try:
+                fps_value = float(fps_data)
+                if fps_value > 0.0:
+                    target_fps = fps_value
+            except (TypeError, ValueError):
+                target_fps = None
+
+        return target_resolution, target_fps
+
+    def _effective_resize_targets(self) -> Tuple[Optional[tuple[int, int]], Optional[float]]:
+        target_resolution, target_fps = self._selected_resize_targets()
+        if self.video_meta is None:
+            return target_resolution, target_fps
+
+        source_width = max(0, int(self.video_meta.width))
+        source_height = max(0, int(self.video_meta.height))
+        source_fps = max(0.0, float(self.video_meta.fps))
+
+        if target_resolution is not None:
+            target_w, target_h = target_resolution
+            if source_width > 0 and source_height > 0:
+                if target_w > source_width or target_h > source_height:
+                    target_resolution = None
+                elif target_w >= source_width and target_h >= source_height:
+                    target_resolution = None
+
+        if target_fps is not None and source_fps > 0.0 and target_fps >= (source_fps - 0.001):
+            target_fps = None
+
+        return target_resolution, target_fps
 
     def _update_edit_segments_label(self) -> None:
         if not hasattr(self, "edit_segments_label"):
@@ -2103,17 +2301,46 @@ class MainWindow(QMainWindow):
             return
         is_running = self._is_video_edit_running()
         has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
-        has_segments = bool(self.edit_segments)
         output_path = self.edit_output_path_edit.text().strip()
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
+        resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
+
+        has_segments = bool(self.edit_segments)
+        cut_ready = True
+        if cut_enabled:
+            merged_segments, merge_error = self._build_merged_cut_segments()
+            cut_ready = merge_error is None and merged_segments is not None and bool(merged_segments)
+            has_segments = cut_ready
+
+        target_resolution, target_fps = self._effective_resize_targets()
+        resize_ready = (not resize_enabled) or (target_resolution is not None or target_fps is not None)
+
+        has_selected_operation = cut_enabled or resize_enabled
+        has_effective_operation = (cut_enabled and has_segments) or (resize_enabled and (target_resolution is not None or target_fps is not None))
+
         analysis_running = self._is_event_detection_running() or self._is_color_analysis_running()
-        can_run = has_video and has_segments and bool(output_path) and cut_enabled and (not is_running) and (not analysis_running)
+        can_run = (
+            has_video
+            and bool(output_path)
+            and has_selected_operation
+            and has_effective_operation
+            and cut_ready
+            and resize_ready
+            and (not is_running)
+            and (not analysis_running)
+        )
 
         self.edit_cut_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_resize_enabled_checkbox"):
+            self.edit_resize_enabled_checkbox.setEnabled(not is_running)
         self.edit_output_path_edit.setEnabled(not is_running)
         self.edit_output_browse_button.setEnabled(not is_running)
         self.edit_preset_combo.setEnabled(not is_running)
         self.edit_crf_spin.setEnabled(not is_running)
+        if hasattr(self, "edit_target_resolution_combo"):
+            self.edit_target_resolution_combo.setEnabled((not is_running) and resize_enabled)
+        if hasattr(self, "edit_target_fps_combo"):
+            self.edit_target_fps_combo.setEnabled((not is_running) and resize_enabled)
         if is_running:
             if self._video_edit_cancel_requested:
                 self.edit_run_button.setText("Edit Islemi Durduruluyor...")
@@ -2171,20 +2398,38 @@ class MainWindow(QMainWindow):
         if self.video_meta is None or not os.path.isfile(self.video_meta.source_video):
             QMessageBox.warning(self, "Edit", "Aktif video bulunamadi.")
             return
-        if not self.edit_cut_enabled_checkbox.isChecked():
-            QMessageBox.warning(self, "Edit", "Bu surumde yalnizca cut islemi destekleniyor.")
+
+        cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
+        resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
+        if not cut_enabled and not resize_enabled:
+            QMessageBox.warning(self, "Edit", "En az bir islem icin enable secilmelidir.")
             return
 
-        segments, error = self._build_merged_cut_segments()
-        if error is not None or segments is None:
-            QMessageBox.warning(self, "Edit", error or "Kesim segmentleri hazirlanamadi.")
-            return
+        segments: list[tuple[float, float]] = []
+        if cut_enabled:
+            parsed_segments, error = self._build_merged_cut_segments()
+            if error is not None or parsed_segments is None:
+                QMessageBox.warning(self, "Edit", error or "Kesim segmentleri hazirlanamadi.")
+                return
+            segments = parsed_segments
         self.edit_segments = segments
         self._update_edit_segments_label()
 
+        target_resolution: Optional[tuple[int, int]] = None
+        target_fps: Optional[float] = None
+        if resize_enabled:
+            target_resolution, target_fps = self._effective_resize_targets()
+            if target_resolution is None and target_fps is None:
+                QMessageBox.warning(self, "Edit", "Cozunurluk/FPS icin en az bir dusurme secilmelidir.")
+                return
+
         output_path = self.edit_output_path_edit.text().strip()
         if not output_path:
-            output_path = self._default_cut_output_path(self.video_meta.source_video)
+            output_path = self._default_edit_output_path(
+                source_video=self.video_meta.source_video,
+                enable_cut=cut_enabled,
+                enable_resize=resize_enabled,
+            )
             self.edit_output_path_edit.setText(output_path)
         output_path = output_path.strip()
         if not output_path:
@@ -2224,7 +2469,29 @@ class MainWindow(QMainWindow):
 
         self.edit_progress.setValue(0)
         self.edit_log.clear()
-        self._append_edit_log(self._format_segments_summary(self.edit_segments))
+        if cut_enabled:
+            self._append_edit_log(self._format_segments_summary(self.edit_segments))
+        else:
+            self._append_edit_log("Cut adimi devre disi.")
+
+        if resize_enabled:
+            if target_resolution is not None:
+                self._append_edit_log(f"Hedef cozunurluk: {target_resolution[0]}x{target_resolution[1]}")
+            else:
+                self._append_edit_log("Hedef cozunurluk: Orijinal")
+            if target_fps is not None:
+                self._append_edit_log(f"Hedef FPS: {self._format_edit_fps_value(target_fps)}")
+            else:
+                self._append_edit_log("Hedef FPS: Orijinal")
+        else:
+            self._append_edit_log("Cozunurluk/FPS adimi devre disi.")
+
+        planned_steps: list[str] = []
+        if cut_enabled:
+            planned_steps.append("Cut")
+        if resize_enabled:
+            planned_steps.append("Cozunurluk/FPS")
+        self._append_edit_log(f"Planlanan adimlar: {' -> '.join(planned_steps)}")
         self._append_edit_log(f"FFmpeg: {ffmpeg_path}")
         self._append_edit_log(f"Cikti: {output_path}")
         self.statusBar().showMessage("Video edit islemi baslatiliyor...", 2200)
@@ -2238,7 +2505,11 @@ class MainWindow(QMainWindow):
             cut_segments=self.edit_segments,
             preset=preset,
             crf=crf_value,
-            enable_cut=True,
+            enable_cut=cut_enabled,
+            enable_resize=resize_enabled,
+            target_width=target_resolution[0] if target_resolution is not None else None,
+            target_height=target_resolution[1] if target_resolution is not None else None,
+            target_fps=target_fps,
         )
         self.edit_worker.moveToThread(self.edit_thread)
 
@@ -2273,6 +2544,9 @@ class MainWindow(QMainWindow):
             self._append_edit_log(message)
 
     def on_video_edit_result(self, payload: dict) -> None:
+        operations = payload.get("operations")
+        if isinstance(operations, list) and operations:
+            self._append_edit_log(f"Uygulanan adimlar: {', '.join(str(item) for item in operations)}")
         output_path = str(payload.get("output_path", "")).strip()
         if output_path:
             self._append_edit_log(f"Olusan dosya: {output_path}")
@@ -2538,7 +2812,7 @@ class MainWindow(QMainWindow):
 
         self.load_timeline_button.setEnabled(mode_ready and (not any_running))
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
-        self.edit_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
+        self.edit_button.setEnabled((not any_running) and self._has_usable_video())
         self._update_edit_controls()
 
     def _set_detection_controls(self, running: bool) -> None:
