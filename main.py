@@ -2998,7 +2998,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save Template", "At least one ROI rectangle is required.")
             return
 
-        initial_path = self.current_template_path or os.path.join(os.getcwd(), "template.json")
+        initial_path = self.current_template_path or os.path.join(os.getcwd(), "roi_template.json")
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Template",
