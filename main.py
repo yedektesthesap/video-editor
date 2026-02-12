@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
@@ -59,6 +60,7 @@ EVENT_COL_START = 4
 EVENT_COL_END = 5
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
+EVENT_TABLE_VISIBLE_ROWS = 10
 
 SOURCE_START_SENSITIVITY_PRESETS: dict[str, dict[str, float]] = {
     "Hassas": {
@@ -1444,10 +1446,19 @@ class MainWindow(QMainWindow):
         self.event_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.event_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.event_table.verticalHeader().setVisible(False)
+        self.event_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         header = self.event_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.event_table.cellClicked.connect(self.on_event_table_cell_clicked)
         self.event_table.itemSelectionChanged.connect(self.on_event_table_selection_changed)
+
+        self.event_table_frame = QFrame(upper_section)
+        self.event_table_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.event_table_frame.setFrameShadow(QFrame.Shadow.Plain)
+        event_table_frame_layout = QVBoxLayout(self.event_table_frame)
+        event_table_frame_layout.setContentsMargins(0, 0, 0, 0)
+        event_table_frame_layout.setSpacing(0)
+        event_table_frame_layout.addWidget(self.event_table)
 
         self.manual_controls_box = QGroupBox("Manuel Olay Atama")
         manual_layout = QVBoxLayout(self.manual_controls_box)
@@ -1526,11 +1537,15 @@ class MainWindow(QMainWindow):
         upper_layout.setContentsMargins(0, 0, 0, 0)
         upper_layout.addLayout(top_row_layout)
         upper_layout.addWidget(self.manual_controls_box)
-        upper_layout.addWidget(self.event_table, stretch=1)
+        upper_layout.addWidget(self.event_table_frame)
         event_table_actions_layout = QHBoxLayout()
         event_table_actions_layout.setContentsMargins(0, 0, 0, 0)
         event_table_actions_layout.addStretch(1)
         event_table_actions_layout.addWidget(self.save_timeline_button)
+        self.edit_button = QPushButton("Edit")
+        self.edit_button.setEnabled(False)
+        self.edit_button.clicked.connect(self.on_open_edit_clicked)
+        event_table_actions_layout.addWidget(self.edit_button)
         upper_layout.addLayout(event_table_actions_layout)
 
         self.event_lower_section = QWidget(right_panel)
@@ -1562,6 +1577,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.event_splitter)
 
         self._reset_event_table()
+        self._update_event_table_frame_height()
         self._refresh_color_roi_combo()
         self._update_analysis_controls()
 
@@ -1835,6 +1851,17 @@ class MainWindow(QMainWindow):
     def switch_to_event_tab(self) -> None:
         self._set_current_screen("event", push_history=True)
 
+    def on_open_edit_clicked(self) -> None:
+        self.statusBar().showMessage("Edit ekrani henuz hazir degil.", 2200)
+
+    def _update_event_table_frame_height(self) -> None:
+        row_height = max(1, int(self.event_table.verticalHeader().defaultSectionSize()))
+        header_height = max(1, int(self.event_table.horizontalHeader().height()))
+        frame_border = max(0, int(self.event_table.frameWidth()) * 2)
+        target_height = header_height + (EVENT_TABLE_VISIBLE_ROWS * row_height) + frame_border
+        self.event_table_frame.setMinimumHeight(target_height)
+        self.event_table_frame.setMaximumHeight(target_height)
+
     def _set_table_item(self, row: int, col: int, value: str) -> None:
         item = QTableWidgetItem(value)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1864,6 +1891,7 @@ class MainWindow(QMainWindow):
             self._set_time_table_item(row, EVENT_COL_START, None)
             self._set_time_table_item(row, EVENT_COL_END, None)
             self._set_table_item(row, 6, "0.00")
+        self._update_event_table_frame_height()
 
     def _populate_event_table_from_results(self) -> None:
         self._reset_event_table()
@@ -2056,6 +2084,7 @@ class MainWindow(QMainWindow):
 
         self.load_timeline_button.setEnabled(mode_ready and (not any_running))
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
+        self.edit_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
 
     def _set_detection_controls(self, running: bool) -> None:
         self._event_detection_busy = bool(running)
