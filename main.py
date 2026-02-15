@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
@@ -1092,6 +1093,47 @@ class RoiColorTimelineWidget(QWidget):
         painter.drawRect(rect)
 
 
+class TimeOverlayProgressBar(QProgressBar):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._elapsed_seconds: Optional[float] = None
+        self._remaining_seconds: Optional[float] = None
+        self.setTextVisible(False)
+
+    def set_time_fields(self, elapsed_seconds: Optional[float], remaining_seconds: Optional[float]) -> None:
+        elapsed_value = None if elapsed_seconds is None else max(0.0, float(elapsed_seconds))
+        remaining_value = None if remaining_seconds is None else max(0.0, float(remaining_seconds))
+        if self._elapsed_seconds == elapsed_value and self._remaining_seconds == remaining_value:
+            return
+        self._elapsed_seconds = elapsed_value
+        self._remaining_seconds = remaining_value
+        self.update()
+
+    @staticmethod
+    def _format_clock(seconds: Optional[float]) -> str:
+        if seconds is None:
+            return "--:--"
+        total_seconds = max(0, int(round(float(seconds))))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setPen(QColor("#f4f5f7"))
+        text_rect = self.rect().adjusted(8, 0, -8, 0)
+        left_text = f"Gecen: {self._format_clock(self._elapsed_seconds)}"
+        right_text = f"Kalan: {self._format_clock(self._remaining_seconds)}"
+        percent_text = f"{max(0, min(100, int(self.value())))}%"
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, left_text)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, right_text)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, percent_text)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1135,6 +1177,7 @@ class MainWindow(QMainWindow):
         self._event_detection_cancel_requested = False
         self._color_analysis_cancel_requested = False
         self._video_edit_cancel_requested = False
+        self._video_edit_started_monotonic: Optional[float] = None
         self.detection_mode: Optional[str] = None
         self.timeline_dirty = False
         self.startup_tab: Optional[QWidget] = None
@@ -1795,9 +1838,10 @@ class MainWindow(QMainWindow):
         run_layout.addWidget(self.edit_run_button)
         bottom_layout.addLayout(run_layout)
 
-        self.edit_progress = QProgressBar()
+        self.edit_progress = TimeOverlayProgressBar()
         self.edit_progress.setRange(0, 100)
         self.edit_progress.setValue(0)
+        self.edit_progress.set_time_fields(elapsed_seconds=None, remaining_seconds=None)
         self.edit_progress.setVisible(False)
         bottom_layout.addWidget(self.edit_progress)
 
@@ -2124,6 +2168,7 @@ class MainWindow(QMainWindow):
             )
         )
         self.edit_progress.setValue(0)
+        self._reset_edit_progress_time_fields()
         self.edit_log.clear()
         if self.edit_segments:
             self._append_edit_log(self._format_segments_summary(self.edit_segments))
@@ -2487,6 +2532,31 @@ class MainWindow(QMainWindow):
         self.edit_log.appendPlainText(cleaned)
         self._last_edit_log_message = cleaned
 
+    def _reset_edit_progress_time_fields(self) -> None:
+        self._video_edit_started_monotonic = None
+        if hasattr(self, "edit_progress") and isinstance(self.edit_progress, TimeOverlayProgressBar):
+            self.edit_progress.set_time_fields(elapsed_seconds=None, remaining_seconds=None)
+
+    def _sync_edit_progress_time_fields(self, percent: int) -> None:
+        if not hasattr(self, "edit_progress") or not isinstance(self.edit_progress, TimeOverlayProgressBar):
+            return
+        bounded = max(0, min(100, int(percent)))
+        if self._video_edit_started_monotonic is None:
+            self.edit_progress.set_time_fields(
+                elapsed_seconds=0.0 if bounded <= 0 else None,
+                remaining_seconds=0.0 if bounded >= 100 else None,
+            )
+            return
+        elapsed_seconds = max(0.0, time.monotonic() - self._video_edit_started_monotonic)
+        remaining_seconds: Optional[float]
+        if bounded <= 0:
+            remaining_seconds = None
+        elif bounded >= 100:
+            remaining_seconds = 0.0
+        else:
+            remaining_seconds = elapsed_seconds * (100.0 - float(bounded)) / float(bounded)
+        self.edit_progress.set_time_fields(elapsed_seconds=elapsed_seconds, remaining_seconds=remaining_seconds)
+
     def _is_video_edit_running(self) -> bool:
         return self._video_edit_busy or (self.edit_thread is not None and self.edit_thread.isRunning())
 
@@ -2715,6 +2785,8 @@ class MainWindow(QMainWindow):
         crf_value = int(self.edit_crf_spin.value())
 
         self.edit_progress.setValue(0)
+        self._video_edit_started_monotonic = time.monotonic()
+        self._sync_edit_progress_time_fields(0)
         self.edit_log.clear()
         if cut_enabled:
             self._append_edit_log(self._format_segments_summary(self.edit_segments))
@@ -2821,7 +2893,9 @@ class MainWindow(QMainWindow):
         self._update_edit_controls()
 
     def on_video_edit_progress(self, percent: int, message: str) -> None:
-        self.edit_progress.setValue(max(0, min(100, int(percent))))
+        bounded = max(0, min(100, int(percent)))
+        self.edit_progress.setValue(bounded)
+        self._sync_edit_progress_time_fields(bounded)
         if message.strip():
             self._append_edit_log(message)
 
@@ -2834,12 +2908,15 @@ class MainWindow(QMainWindow):
             self._append_edit_log(f"Olusan dosya: {output_path}")
             self.statusBar().showMessage(f"Video edit tamamlandi: {output_path}", 4000)
         self.edit_progress.setValue(100)
+        self._sync_edit_progress_time_fields(100)
 
     def on_video_edit_error(self, message: str) -> None:
+        self._sync_edit_progress_time_fields(self.edit_progress.value())
         self._append_edit_log(f"Hata: {message}")
         QMessageBox.critical(self, "Video Edit", message)
 
     def on_video_edit_finished(self) -> None:
+        self._sync_edit_progress_time_fields(self.edit_progress.value())
         self._set_video_edit_controls(running=False)
         if self._video_edit_cancel_requested:
             self._append_edit_log("Video edit islemi kullanici tarafindan durduruldu.")
@@ -2847,6 +2924,7 @@ class MainWindow(QMainWindow):
         elif self.edit_progress.value() < 100:
             self.statusBar().showMessage("Video edit islemi bitti.", 3000)
         self._video_edit_cancel_requested = False
+        self._video_edit_started_monotonic = None
 
     def on_video_edit_thread_finished(self) -> None:
         self.edit_worker = None
