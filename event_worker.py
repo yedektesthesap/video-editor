@@ -131,6 +131,7 @@ class VideoEditWorker(QObject):
         preset: str = "slow",
         crf: int = 0,
         enable_cut: bool = True,
+        cut_stream_copy: bool = False,
         enable_resize: bool = False,
         target_width: Optional[int] = None,
         target_height: Optional[int] = None,
@@ -149,6 +150,7 @@ class VideoEditWorker(QObject):
         self.preset = str(preset).strip() or "slow"
         self.crf = max(0, min(51, int(crf)))
         self.enable_cut = bool(enable_cut)
+        self.cut_stream_copy = bool(cut_stream_copy)
         self.enable_resize = bool(enable_resize)
         self.target_width = int(target_width) if target_width is not None else None
         self.target_height = int(target_height) if target_height is not None else None
@@ -201,6 +203,8 @@ class VideoEditWorker(QObject):
                 raise RuntimeError("Cut segment listesi bos.")
             if cut_duration <= 0.0:
                 raise RuntimeError("Toplam kesim suresi sifir veya gecersiz.")
+            if self.cut_stream_copy and len(self.cut_segments) != 1:
+                raise RuntimeError("Stream copy cut yalnizca tek segment ile calisir.")
 
         if self.enable_resize:
             if (self.target_width is None) != (self.target_height is None):
@@ -258,7 +262,7 @@ class VideoEditWorker(QObject):
                         output_path=step_output,
                         has_audio=has_audio,
                     )
-                    step_label = "Cut"
+                    step_label = "Cut (Stream Copy)" if self.cut_stream_copy else "Cut"
                     step_duration = cut_duration
                 elif operation_name == "resize":
                     command = self._build_resize_command(
@@ -374,6 +378,33 @@ class VideoEditWorker(QObject):
         output_path: str,
         has_audio: bool,
     ) -> list[str]:
+        if self.cut_stream_copy:
+            if len(self.cut_segments) != 1:
+                raise RuntimeError("Stream copy cut icin tek segment gereklidir.")
+            start_seconds, end_seconds = self.cut_segments[0]
+            command = [
+                ffmpeg_binary,
+                "-y",
+                "-hide_banner",
+                "-nostats",
+                "-loglevel",
+                "error",
+                "-progress",
+                "pipe:1",
+                "-ss",
+                f"{start_seconds:.6f}",
+                "-to",
+                f"{end_seconds:.6f}",
+                "-i",
+                input_path,
+                "-map",
+                "0:v:0",
+            ]
+            if has_audio:
+                command.extend(["-map", "0:a?"])
+            command.extend(["-c", "copy", "-movflags", "+faststart", output_path])
+            return command
+
         filter_complex = self._build_filter_complex(self.cut_segments, has_audio=has_audio)
         command = [
             ffmpeg_binary,
