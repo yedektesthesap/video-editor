@@ -1721,7 +1721,7 @@ class MainWindow(QMainWindow):
         self.edit_cut_stream_copy_checkbox = QCheckBox("Stream Copy (Hizli, keyframe bagimli)")
         self.edit_cut_stream_copy_checkbox.setChecked(False)
         self.edit_cut_stream_copy_checkbox.setToolTip(
-            "Yalnizca tek segmentte kullanilir. Kesim noktasi keyframe'e kayabilir."
+            "Coklu segmentte de kullanilir; keyframe nedeniyle kesim noktasi kayabilir."
         )
         self.edit_cut_stream_copy_checkbox.stateChanged.connect(self._update_edit_controls)
 
@@ -2575,7 +2575,6 @@ class MainWindow(QMainWindow):
         has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
         output_path = self.edit_output_path_edit.text().strip()
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
-        cut_stream_copy_enabled = hasattr(self, "edit_cut_stream_copy_checkbox") and self.edit_cut_stream_copy_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio_enabled = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
@@ -2588,9 +2587,6 @@ class MainWindow(QMainWindow):
             merged_segments, merge_error = self._build_merged_cut_segments()
             cut_ready = merge_error is None and merged_segments is not None and bool(merged_segments)
             has_segments = cut_ready
-        cut_stream_copy_ready = True
-        if cut_enabled and cut_stream_copy_enabled and cut_ready:
-            cut_stream_copy_ready = merged_segments is not None and len(merged_segments) == 1
 
         target_resolution, target_fps = self._effective_resize_targets()
         resize_ready = (not resize_enabled) or (target_resolution is not None or target_fps is not None)
@@ -2617,7 +2613,6 @@ class MainWindow(QMainWindow):
             and has_selected_operation
             and has_effective_operation
             and cut_ready
-            and cut_stream_copy_ready
             and resize_ready
             and speed_ready
             and effect_ready
@@ -2726,13 +2721,6 @@ class MainWindow(QMainWindow):
             segments = parsed_segments
         self.edit_segments = segments
         self._update_edit_segments_label()
-        if cut_enabled and cut_stream_copy_enabled and len(self.edit_segments) != 1:
-            QMessageBox.warning(
-                self,
-                "Edit",
-                "Stream Copy cut su an yalnizca tek segment ile kullanilabilir.",
-            )
-            return
 
         target_resolution: Optional[tuple[int, int]] = None
         target_fps: Optional[float] = None
