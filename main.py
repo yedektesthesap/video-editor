@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSplitter,
     QSpinBox,
@@ -186,6 +187,16 @@ QProgressBar {
 QProgressBar::chunk {
     background-color: #2f8f4e;
     border-radius: 5px;
+}
+
+QCheckBox {
+    spacing: 6px;
+    min-height: 22px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
 }
 
 QScrollBar:vertical {
@@ -1688,6 +1699,12 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(8)
 
+        top_scroll = QScrollArea(container)
+        top_scroll.setWidgetResizable(True)
+        top_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        top_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        top_scroll.setWidget(top_content)
+
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
         self.edit_source_video_label = QLabel("Kaynak video: -")
@@ -1832,6 +1849,7 @@ class MainWindow(QMainWindow):
         effect_layout.addWidget(self.edit_audio_effect_enabled_checkbox)
         effect_layout.addLayout(effect_target_layout)
         top_layout.addWidget(self.edit_audio_effect_group)
+        top_layout.addStretch(1)
 
         bottom_content = QWidget(container)
         bottom_layout = QVBoxLayout(bottom_content)
@@ -1859,8 +1877,8 @@ class MainWindow(QMainWindow):
         self.edit_log.setMaximumBlockCount(400)
         bottom_layout.addWidget(self.edit_log, stretch=1)
 
-        root_layout.addWidget(top_content, stretch=3, alignment=Qt.AlignmentFlag.AlignTop)
-        root_layout.addWidget(bottom_content, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
+        root_layout.addWidget(top_scroll, stretch=3)
+        root_layout.addWidget(bottom_content, stretch=1)
         self._refresh_edit_resolution_options()
         self._update_edit_controls()
 
