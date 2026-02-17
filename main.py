@@ -1668,6 +1668,13 @@ class MainWindow(QMainWindow):
         self.edit_cut_enabled_checkbox.setChecked(True)
         self.edit_cut_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
 
+        self.edit_cut_stream_copy_checkbox = QCheckBox("Stream Copy (Hizli, keyframe bagimli)")
+        self.edit_cut_stream_copy_checkbox.setChecked(False)
+        self.edit_cut_stream_copy_checkbox.setToolTip(
+            "Yalnizca tek segmentte kullanilir. Kesim noktasi keyframe'e kayabilir."
+        )
+        self.edit_cut_stream_copy_checkbox.stateChanged.connect(self._update_edit_controls)
+
         self.edit_segments_label = QLabel("Hazir segment: -")
         self.edit_segments_label.setStyleSheet("color: #9aa4b7;")
 
@@ -1686,6 +1693,7 @@ class MainWindow(QMainWindow):
         quality_layout.addStretch(1)
 
         cut_layout.addWidget(self.edit_cut_enabled_checkbox)
+        cut_layout.addWidget(self.edit_cut_stream_copy_checkbox)
         cut_layout.addWidget(self.edit_segments_label)
         cut_layout.addLayout(quality_layout)
         top_layout.addWidget(self.edit_cut_group)
@@ -2484,6 +2492,7 @@ class MainWindow(QMainWindow):
         has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
         output_path = self.edit_output_path_edit.text().strip()
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
+        cut_stream_copy_enabled = hasattr(self, "edit_cut_stream_copy_checkbox") and self.edit_cut_stream_copy_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio_enabled = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
@@ -2491,10 +2500,14 @@ class MainWindow(QMainWindow):
 
         has_segments = bool(self.edit_segments)
         cut_ready = True
+        merged_segments: Optional[list[tuple[float, float]]] = None
         if cut_enabled:
             merged_segments, merge_error = self._build_merged_cut_segments()
             cut_ready = merge_error is None and merged_segments is not None and bool(merged_segments)
             has_segments = cut_ready
+        cut_stream_copy_ready = True
+        if cut_enabled and cut_stream_copy_enabled and cut_ready:
+            cut_stream_copy_ready = merged_segments is not None and len(merged_segments) == 1
 
         target_resolution, target_fps = self._effective_resize_targets()
         resize_ready = (not resize_enabled) or (target_resolution is not None or target_fps is not None)
@@ -2521,6 +2534,7 @@ class MainWindow(QMainWindow):
             and has_selected_operation
             and has_effective_operation
             and cut_ready
+            and cut_stream_copy_ready
             and resize_ready
             and speed_ready
             and effect_ready
@@ -2529,6 +2543,8 @@ class MainWindow(QMainWindow):
         )
 
         self.edit_cut_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_cut_stream_copy_checkbox"):
+            self.edit_cut_stream_copy_checkbox.setEnabled((not is_running) and cut_enabled)
         if hasattr(self, "edit_resize_enabled_checkbox"):
             self.edit_resize_enabled_checkbox.setEnabled(not is_running)
         self.edit_output_path_edit.setEnabled(not is_running)
@@ -2608,6 +2624,7 @@ class MainWindow(QMainWindow):
             return
 
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
+        cut_stream_copy_enabled = hasattr(self, "edit_cut_stream_copy_checkbox") and self.edit_cut_stream_copy_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
@@ -2626,6 +2643,13 @@ class MainWindow(QMainWindow):
             segments = parsed_segments
         self.edit_segments = segments
         self._update_edit_segments_label()
+        if cut_enabled and cut_stream_copy_enabled and len(self.edit_segments) != 1:
+            QMessageBox.warning(
+                self,
+                "Edit",
+                "Stream Copy cut su an yalnizca tek segment ile kullanilabilir.",
+            )
+            return
 
         target_resolution: Optional[tuple[int, int]] = None
         target_fps: Optional[float] = None
@@ -2646,6 +2670,7 @@ class MainWindow(QMainWindow):
             return
 
         cut_effective = cut_enabled and bool(self.edit_segments)
+        cut_stream_copy_effective = cut_effective and cut_stream_copy_enabled
         resize_effective = resize_enabled and (target_resolution is not None or target_fps is not None)
         speed_effective = speed_factor is not None
         effect_effective = audio_effect_preset is not None
@@ -2705,6 +2730,10 @@ class MainWindow(QMainWindow):
         self.edit_log.clear()
         if cut_enabled:
             self._append_edit_log(self._format_segments_summary(self.edit_segments))
+            if cut_stream_copy_effective:
+                self._append_edit_log("Cut modu: Stream Copy (hizli, keyframe bagimli).")
+            else:
+                self._append_edit_log("Cut modu: Re-encode (frame hassas).")
         else:
             self._append_edit_log("Cut adimi devre disi.")
 
@@ -2770,6 +2799,7 @@ class MainWindow(QMainWindow):
             preset=preset,
             crf=crf_value,
             enable_cut=cut_effective,
+            cut_stream_copy=cut_stream_copy_effective,
             enable_resize=resize_effective,
             target_width=target_resolution[0] if target_resolution is not None else None,
             target_height=target_resolution[1] if target_resolution is not None else None,
