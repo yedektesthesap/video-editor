@@ -1740,15 +1740,19 @@ class MainWindow(QMainWindow):
 
         quality_layout = QHBoxLayout()
         quality_layout.setContentsMargins(0, 0, 0, 0)
-        quality_layout.addWidget(QLabel("Preset:"))
+        self.edit_preset_label = QLabel("Preset:")
+        quality_layout.addWidget(self.edit_preset_label)
         self.edit_preset_combo = QComboBox()
         self.edit_preset_combo.addItems(["ultrafast", "fast", "medium", "slow"])
         self.edit_preset_combo.setCurrentText("slow")
+        self.edit_preset_combo.currentIndexChanged.connect(self._update_edit_quality_tooltips)
         quality_layout.addWidget(self.edit_preset_combo)
-        quality_layout.addWidget(QLabel("CRF:"))
+        self.edit_crf_label = QLabel("CRF:")
+        quality_layout.addWidget(self.edit_crf_label)
         self.edit_crf_spin = QSpinBox()
         self.edit_crf_spin.setRange(0, 51)
         self.edit_crf_spin.setValue(0)
+        self.edit_crf_spin.valueChanged.connect(self._update_edit_quality_tooltips)
         quality_layout.addWidget(self.edit_crf_spin)
         quality_layout.addStretch(1)
 
@@ -1872,6 +1876,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(top_scroll, stretch=3)
         root_layout.addWidget(bottom_content, stretch=1)
         self._refresh_edit_resolution_options()
+        self._update_edit_quality_tooltips()
         self._update_edit_controls()
 
     def _setup_shortcuts(self) -> None:
@@ -2338,6 +2343,59 @@ class MainWindow(QMainWindow):
     def _format_segments_summary(self, segments: list[tuple[float, float]]) -> str:
         total = sum(max(0.0, end_seconds - start_seconds) for start_seconds, end_seconds in segments)
         return f"Kesim segmentleri hazirlandi: {len(segments)} adet | Toplam: {total:.2f} sn"
+
+    def _describe_preset_effect(self, preset: str) -> str:
+        preset_key = str(preset).strip().lower()
+        if preset_key == "ultrafast":
+            return "Preset ultrafast: En hizli encode; sikistirma verimi dusuk oldugu icin dosya genelde daha buyuk olur."
+        if preset_key == "fast":
+            return "Preset fast: Hiz odakli; kalite benzer kalabilir ancak dosya boyutu medium/slow'a gore genelde daha buyuktur."
+        if preset_key == "medium":
+            return "Preset medium: Hiz ve sikistirma verimi dengeli secenektir."
+        if preset_key == "slow":
+            return "Preset slow: Daha yavas encode; sikistirma verimi daha yuksek oldugu icin dosya genelde daha kucuk olur."
+        return f"Preset {preset_key}: Secili deger icin hiz/sikistirma dengesi uygulanir."
+
+    def _describe_crf_effect(self, crf: int) -> str:
+        value = max(0, min(51, int(crf)))
+        if value == 0:
+            return "CRF 0: Neredeyse kayipsiz kalite; dosya boyutu cok buyuk olur."
+        if 1 <= value <= 17:
+            return "CRF 1-17: Cok yuksek kalite; dosya boyutu yuksek olur."
+        if 18 <= value <= 22:
+            return "CRF 18-22: Yuksek kalite ve dengeli boyut (yaygin kaliteli aralik)."
+        if 23 <= value <= 28:
+            return "CRF 23-28: Orta kalite; dosya boyutu belirgin sekilde azalir."
+        if 29 <= value <= 40:
+            return "CRF 29-40: Dusuk kaliteye yaklasir; dosya boyutu daha da kuculur."
+        return "CRF 41-51: Cok dusuk kalite; en kucuk dosya boyutu hedeflenir."
+
+    def _build_edit_quality_tooltip(self) -> str:
+        preset = "slow"
+        if hasattr(self, "edit_preset_combo"):
+            selected_preset = self.edit_preset_combo.currentText().strip().lower()
+            if selected_preset:
+                preset = selected_preset
+        crf_value = int(self.edit_crf_spin.value()) if hasattr(self, "edit_crf_spin") else 0
+
+        preset_effect = self._describe_preset_effect(preset)
+        crf_effect = self._describe_crf_effect(crf_value)
+        return (
+            "Kalite Rehberi (Preset + CRF)\n"
+            "Preset encode hizini ve sikistirma verimini belirler.\n"
+            "Hiz sirasi: ultrafast > fast > medium > slow.\n"
+            f"{preset_effect}\n"
+            "CRF: dusuk deger = daha iyi kalite + daha buyuk dosya; yuksek deger = daha dusuk kalite + daha kucuk dosya.\n"
+            f"{crf_effect}\n"
+            f"Secili: preset={preset}, crf={crf_value}"
+        )
+
+    def _update_edit_quality_tooltips(self, *_args: object) -> None:
+        if not hasattr(self, "edit_preset_label") or not hasattr(self, "edit_crf_label"):
+            return
+        tooltip_text = self._build_edit_quality_tooltip()
+        self.edit_preset_label.setToolTip(tooltip_text)
+        self.edit_crf_label.setToolTip(tooltip_text)
 
     def _update_edit_video_label(self) -> None:
         if not hasattr(self, "edit_source_video_label"):
