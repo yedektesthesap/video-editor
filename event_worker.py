@@ -131,7 +131,6 @@ class VideoEditWorker(QObject):
         preset: str = "slow",
         crf: int = 0,
         enable_cut: bool = True,
-        cut_stream_copy: bool = False,
         enable_resize: bool = False,
         target_width: Optional[int] = None,
         target_height: Optional[int] = None,
@@ -150,7 +149,6 @@ class VideoEditWorker(QObject):
         self.preset = str(preset).strip() or "slow"
         self.crf = max(0, min(51, int(crf)))
         self.enable_cut = bool(enable_cut)
-        self.cut_stream_copy = bool(cut_stream_copy)
         self.enable_resize = bool(enable_resize)
         self.target_width = int(target_width) if target_width is not None else None
         self.target_height = int(target_height) if target_height is not None else None
@@ -259,9 +257,8 @@ class VideoEditWorker(QObject):
                         input_path=input_path,
                         output_path=step_output,
                         has_audio=has_audio,
-                        temp_files=temp_files,
                     )
-                    step_label = "Cut (Stream Copy)" if self.cut_stream_copy else "Cut"
+                    step_label = "Cut"
                     step_duration = cut_duration
                 elif operation_name == "resize":
                     command = self._build_resize_command(
@@ -376,58 +373,7 @@ class VideoEditWorker(QObject):
         input_path: str,
         output_path: str,
         has_audio: bool,
-        temp_files: list[str],
     ) -> list[str]:
-        if self.cut_stream_copy:
-            command: list[str]
-            if len(self.cut_segments) == 1:
-                start_seconds, end_seconds = self.cut_segments[0]
-                command = [
-                    ffmpeg_binary,
-                    "-y",
-                    "-hide_banner",
-                    "-nostats",
-                    "-loglevel",
-                    "error",
-                    "-progress",
-                    "pipe:1",
-                    "-ss",
-                    f"{start_seconds:.6f}",
-                    "-to",
-                    f"{end_seconds:.6f}",
-                    "-i",
-                    input_path,
-                    "-map",
-                    "0:v:0",
-                ]
-            else:
-                concat_list_path = self._create_stream_copy_concat_list(
-                    input_path=input_path,
-                    temp_files=temp_files,
-                )
-                command = [
-                    ffmpeg_binary,
-                    "-y",
-                    "-hide_banner",
-                    "-nostats",
-                    "-loglevel",
-                    "error",
-                    "-progress",
-                    "pipe:1",
-                    "-f",
-                    "concat",
-                    "-safe",
-                    "0",
-                    "-i",
-                    concat_list_path,
-                    "-map",
-                    "0:v:0",
-                ]
-            if has_audio:
-                command.extend(["-map", "0:a?"])
-            command.extend(["-c", "copy", "-movflags", "+faststart", output_path])
-            return command
-
         filter_complex = self._build_filter_complex(self.cut_segments, has_audio=has_audio)
         command = [
             ffmpeg_binary,
@@ -455,29 +401,6 @@ class VideoEditWorker(QObject):
             command.extend(["-map", "[aout]", "-c:a", "alac"])
         command.extend(["-movflags", "+faststart", output_path])
         return command
-
-    @staticmethod
-    def _escape_ffconcat_path(path: str) -> str:
-        escaped = os.path.abspath(path).replace("\\", "/")
-        return escaped.replace("'", "\\'")
-
-    def _create_stream_copy_concat_list(self, input_path: str, temp_files: list[str]) -> str:
-        fd, concat_path = tempfile.mkstemp(prefix="video_edit_stream_copy_", suffix=".ffconcat")
-        os.close(fd)
-        temp_files.append(concat_path)
-
-        escaped_input_path = self._escape_ffconcat_path(input_path)
-        lines: list[str] = ["ffconcat version 1.0"]
-        for start_seconds, end_seconds in self.cut_segments:
-            lines.append(f"file '{escaped_input_path}'")
-            lines.append(f"inpoint {start_seconds:.6f}")
-            lines.append(f"outpoint {end_seconds:.6f}")
-
-        with open(concat_path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write("\n".join(lines))
-            handle.write("\n")
-
-        return concat_path
 
     def _build_resize_command(
         self,
