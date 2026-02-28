@@ -2347,28 +2347,28 @@ class MainWindow(QMainWindow):
     def _describe_preset_effect(self, preset: str) -> str:
         preset_key = str(preset).strip().lower()
         if preset_key == "ultrafast":
-            return "Preset ultrafast: En hizli encode; sikistirma verimi dusuk oldugu icin dosya genelde daha buyuk olur."
+            return "ultrafast: en hizli, dosya boyutu genelde daha buyuk."
         if preset_key == "fast":
-            return "Preset fast: Hiz odakli; kalite benzer kalabilir ancak dosya boyutu medium/slow'a gore genelde daha buyuktur."
+            return "fast: hizli, dosya boyutu medium/slow'dan genelde buyuk."
         if preset_key == "medium":
-            return "Preset medium: Hiz ve sikistirma verimi dengeli secenektir."
+            return "medium: hiz ve boyut dengeli."
         if preset_key == "slow":
-            return "Preset slow: Daha yavas encode; sikistirma verimi daha yuksek oldugu icin dosya genelde daha kucuk olur."
-        return f"Preset {preset_key}: Secili deger icin hiz/sikistirma dengesi uygulanir."
+            return "slow: daha yavas, dosya boyutu genelde daha kucuk."
+        return f"{preset_key}: secili preset hiz/boyut dengesini belirler."
 
     def _describe_crf_effect(self, crf: int) -> str:
         value = max(0, min(51, int(crf)))
         if value == 0:
-            return "CRF 0: Neredeyse kayipsiz kalite; dosya boyutu cok buyuk olur."
+            return "CRF 0: neredeyse kayipsiz, dosya cok buyuk."
         if 1 <= value <= 17:
-            return "CRF 1-17: Cok yuksek kalite; dosya boyutu yuksek olur."
+            return "CRF 1-17: cok yuksek kalite, buyuk dosya."
         if 18 <= value <= 22:
-            return "CRF 18-22: Yuksek kalite ve dengeli boyut (yaygin kaliteli aralik)."
+            return "CRF 18-22: yuksek kalite, dengeli boyut."
         if 23 <= value <= 28:
-            return "CRF 23-28: Orta kalite; dosya boyutu belirgin sekilde azalir."
+            return "CRF 23-28: orta kalite, daha kucuk dosya."
         if 29 <= value <= 40:
-            return "CRF 29-40: Dusuk kaliteye yaklasir; dosya boyutu daha da kuculur."
-        return "CRF 41-51: Cok dusuk kalite; en kucuk dosya boyutu hedeflenir."
+            return "CRF 29-40: dusuk kaliteye iner, dosya kuculur."
+        return "CRF 41-51: cok dusuk kalite, en kucuk dosya."
 
     def _build_edit_quality_tooltip(self) -> str:
         preset = "slow"
@@ -2381,11 +2381,9 @@ class MainWindow(QMainWindow):
         preset_effect = self._describe_preset_effect(preset)
         crf_effect = self._describe_crf_effect(crf_value)
         return (
-            "Kalite Rehberi (Preset + CRF)\n"
-            "Preset encode hizini ve sikistirma verimini belirler.\n"
-            "Hiz sirasi: ultrafast > fast > medium > slow.\n"
+            "Preset: hiz/boyut dengesini belirler (ultrafast > fast > medium > slow).\n"
             f"{preset_effect}\n"
-            "CRF: dusuk deger = daha iyi kalite + daha buyuk dosya; yuksek deger = daha dusuk kalite + daha kucuk dosya.\n"
+            "CRF: dusuk = daha iyi kalite, yuksek = daha kucuk dosya.\n"
             f"{crf_effect}\n"
             f"Secili: preset={preset}, crf={crf_value}"
         )
