@@ -2340,6 +2340,34 @@ class MainWindow(QMainWindow):
 
         return os.path.join(source_dir, f"{source_name}{suffix}.mp4")
 
+    @staticmethod
+    def _suggest_non_conflicting_output_path(path: str) -> str:
+        base_dir = os.path.dirname(path)
+        base_name, extension = os.path.splitext(os.path.basename(path))
+        extension = extension or ".mp4"
+        for index in range(1, 10000):
+            candidate = os.path.join(base_dir, f"{base_name}_{index}{extension}")
+            if not os.path.exists(candidate):
+                return candidate
+        return os.path.join(base_dir, f"{base_name}_{int(time.time())}{extension}")
+
+    def _prompt_rename_output_path(self, existing_path: str) -> Optional[str]:
+        suggested_path = self._suggest_non_conflicting_output_path(existing_path)
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Cikti Dosyasi Zaten Var",
+            suggested_path,
+            "MP4 Files (*.mp4);;All Files (*.*)",
+        )
+        if not save_path:
+            return None
+        normalized = save_path.strip()
+        if not normalized:
+            return None
+        if not normalized.lower().endswith(".mp4"):
+            normalized += ".mp4"
+        return normalized
+
     def _format_segments_summary(self, segments: list[tuple[float, float]]) -> str:
         total = sum(max(0.0, end_seconds - start_seconds) for start_seconds, end_seconds in segments)
         return f"Kesim segmentleri hazirlandi: {len(segments)} adet | Toplam: {total:.2f} sn"
@@ -2840,16 +2868,20 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Edit", "Cikti dosyasi kaynak video ile ayni olamaz.")
             return
 
-        if os.path.exists(output_path):
-            overwrite = QMessageBox.question(
-                self,
-                "Edit",
-                "Cikti dosyasi zaten var. Uzerine yazilsin mi?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if overwrite != QMessageBox.StandardButton.Yes:
+        while os.path.exists(output_path):
+            renamed_output = self._prompt_rename_output_path(output_path)
+            if renamed_output is None:
                 return
+            output_path = renamed_output
+            self.edit_output_path_edit.setText(output_path)
+
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.isdir(output_dir):
+            QMessageBox.warning(self, "Edit", "Cikti klasoru bulunamadi.")
+            return
+        if os.path.abspath(source_path) == os.path.abspath(output_path):
+            QMessageBox.warning(self, "Edit", "Cikti dosyasi kaynak video ile ayni olamaz.")
+            return
 
         ffmpeg_path = self._resolve_ffmpeg_path()
         if ffmpeg_path is None:
