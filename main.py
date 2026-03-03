@@ -2289,9 +2289,7 @@ class MainWindow(QMainWindow):
             return
 
         source_video = self.video_meta.source_video if self.video_meta is not None else ""
-        initial_dir = self._default_edit_output_directory(source_video) if source_video else os.getcwd()
-        if not os.path.isdir(initial_dir):
-            initial_dir = os.getcwd()
+        initial_dir = self._default_project_directory()
 
         video_name = os.path.splitext(os.path.basename(source_video))[0].strip() if source_video else "video"
         if not video_name:
@@ -2337,10 +2335,7 @@ class MainWindow(QMainWindow):
     def on_import_text_overlay_rows_clicked(self) -> None:
         if not hasattr(self, "edit_text_overlay_table"):
             return
-        source_video = self.video_meta.source_video if self.video_meta is not None else ""
-        initial_dir = self._default_edit_output_directory(source_video) if source_video else os.getcwd()
-        if not os.path.isdir(initial_dir):
-            initial_dir = os.getcwd()
+        initial_dir = self._default_project_directory()
 
         load_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -3214,6 +3209,16 @@ class MainWindow(QMainWindow):
         source_dir = os.path.dirname(os.path.abspath(source_video))
         if source_dir and os.path.isdir(source_dir):
             return source_dir
+        return os.getcwd()
+
+    @staticmethod
+    def _default_project_directory() -> str:
+        if getattr(sys, "frozen", False):
+            project_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            project_dir = os.path.dirname(os.path.abspath(__file__))
+        if project_dir and os.path.isdir(project_dir):
+            return project_dir
         return os.getcwd()
 
     def _default_edit_output_path(self, source_video: str, output_directory: str) -> str:
