@@ -140,6 +140,10 @@ class VideoEditWorker(QObject):
         speed_factor: Optional[float] = None,
         enable_audio_effect: bool = False,
         audio_effect_preset: Optional[str] = None,
+        text_overlays: Optional[Sequence[dict]] = None,
+        image_overlays: Optional[Sequence[dict]] = None,
+        external_audio_tracks: Optional[Sequence[dict]] = None,
+        external_audio_mode: str = "mix",
     ) -> None:
         super().__init__()
         self.ffmpeg_path = str(ffmpeg_path)
@@ -158,6 +162,10 @@ class VideoEditWorker(QObject):
         self.speed_factor = float(speed_factor) if speed_factor is not None else None
         self.enable_audio_effect = bool(enable_audio_effect)
         self.audio_effect_preset = str(audio_effect_preset).strip().lower() if audio_effect_preset is not None else None
+        self.text_overlays = [dict(item) for item in (text_overlays or []) if isinstance(item, Mapping)]
+        self.image_overlays = [dict(item) for item in (image_overlays or []) if isinstance(item, Mapping)]
+        self.external_audio_tracks = [dict(item) for item in (external_audio_tracks or []) if isinstance(item, Mapping)]
+        self.external_audio_mode = str(external_audio_mode).strip().lower() or "mix"
         self._cancel_requested = False
         self._process: Optional[subprocess.Popen[str]] = None
 
@@ -186,7 +194,17 @@ class VideoEditWorker(QObject):
             self.finished.emit()
 
     def _run_ffmpeg_edit(self) -> dict:
-        if not self.enable_cut and not self.enable_resize and (not self.remove_audio) and (not self.enable_speed) and (not self.enable_audio_effect):
+        has_visual_overlay = bool(self.text_overlays) or bool(self.image_overlays)
+        has_external_audio = bool(self.external_audio_tracks)
+        if (
+            (not has_visual_overlay)
+            and (not self.enable_cut)
+            and (not self.enable_resize)
+            and (not self.remove_audio)
+            and (not self.enable_speed)
+            and (not self.enable_audio_effect)
+            and (not has_external_audio)
+        ):
             raise RuntimeError("En az bir edit islemi secilmelidir.")
         if not os.path.isfile(self.input_path):
             raise RuntimeError(f"Girdi videosu bulunamadi: {self.input_path}")
@@ -226,13 +244,34 @@ class VideoEditWorker(QObject):
             if self.audio_effect_preset == "none":
                 raise RuntimeError("Ses efekti 'Yok' olamaz.")
 
+        for index, image_item in enumerate(self.image_overlays):
+            image_path = str(image_item.get("path", "")).strip()
+            if not image_path:
+                raise RuntimeError(f"PNG katmani {index + 1} icin dosya yolu bos.")
+            if not os.path.isfile(image_path):
+                raise RuntimeError(f"PNG katmani {index + 1} icin dosya bulunamadi: {image_path}")
+
+        if has_external_audio:
+            if self.external_audio_mode != "mix":
+                raise RuntimeError("Harici ses modu yalnizca 'mix' olabilir.")
+            for index, track_item in enumerate(self.external_audio_tracks):
+                track_path = str(track_item.get("path", "")).strip()
+                if not track_path:
+                    raise RuntimeError(f"Harici ses {index + 1} icin dosya yolu bos.")
+                if not os.path.isfile(track_path):
+                    raise RuntimeError(f"Harici ses {index + 1} dosyasi bulunamadi: {track_path}")
+
         operation_names: list[str] = []
+        if has_visual_overlay:
+            operation_names.append("visual_overlay")
+        if self.remove_audio:
+            operation_names.append("audio_remove")
+        if has_external_audio:
+            operation_names.append("external_audio")
         if self.enable_cut:
             operation_names.append("cut")
         if self.enable_resize:
             operation_names.append("resize")
-        if self.remove_audio:
-            operation_names.append("audio_remove")
         if self.enable_speed:
             operation_names.append("speed")
         if self.enable_audio_effect:
@@ -251,7 +290,36 @@ class VideoEditWorker(QObject):
                 is_last_step = index == (step_count - 1)
                 step_output = output_path if is_last_step else self._create_temp_output_path(temp_files)
 
-                if operation_name == "cut":
+                if operation_name == "visual_overlay":
+                    command = self._build_visual_overlay_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=has_audio,
+                        text_overlays=self.text_overlays,
+                        image_overlays=self.image_overlays,
+                    )
+                    step_label = "Yazi/PNG Katmanlari"
+                    step_duration = estimated_duration
+                elif operation_name == "audio_remove":
+                    command = self._build_remove_audio_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                    )
+                    step_label = "Ses Silme"
+                    step_duration = estimated_duration
+                elif operation_name == "external_audio":
+                    command = self._build_external_audio_mix_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=has_audio,
+                        external_audio_tracks=self.external_audio_tracks,
+                    )
+                    step_label = "Harici Ses Mix"
+                    step_duration = estimated_duration
+                elif operation_name == "cut":
                     command = self._build_cut_command(
                         ffmpeg_binary=ffmpeg_binary,
                         input_path=input_path,
@@ -271,14 +339,6 @@ class VideoEditWorker(QObject):
                         target_fps=self.target_fps,
                     )
                     step_label = "Cozunurluk/FPS"
-                    step_duration = estimated_duration
-                elif operation_name == "audio_remove":
-                    command = self._build_remove_audio_command(
-                        ffmpeg_binary=ffmpeg_binary,
-                        input_path=input_path,
-                        output_path=step_output,
-                    )
-                    step_label = "Ses Silme"
                     step_duration = estimated_duration
                 elif operation_name == "speed":
                     command = self._build_speed_command(
@@ -474,6 +534,177 @@ class VideoEditWorker(QObject):
             output_path,
         ]
 
+    def _build_visual_overlay_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+        has_audio: bool,
+        text_overlays: Sequence[Mapping[str, Any]],
+        image_overlays: Sequence[Mapping[str, Any]],
+    ) -> list[str]:
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+        ]
+        for image_item in image_overlays:
+            image_path = str(image_item.get("path", "")).strip()
+            command.extend(["-loop", "1", "-i", image_path])
+
+        filter_parts: list[str] = []
+        current_video = "[0:v]"
+        image_input_index = 1
+
+        for image_index, image_item in enumerate(image_overlays):
+            start_seconds = float(image_item.get("start", 0.0))
+            end_seconds = float(image_item.get("end", 0.0))
+            x_value = float(image_item.get("x", 0.0))
+            y_value = float(image_item.get("y", 0.0))
+            width_value = image_item.get("width")
+            height_value = image_item.get("height")
+
+            source_label = f"[{image_input_index}:v]"
+            prepared_label = f"[img{image_index}]"
+            if width_value is not None and height_value is not None:
+                filter_parts.append(f"{source_label}scale={int(width_value)}:{int(height_value)}{prepared_label}")
+            else:
+                filter_parts.append(f"{source_label}format=rgba{prepared_label}")
+
+            out_label = f"[vimg{image_index}]"
+            filter_parts.append(
+                f"{current_video}{prepared_label}"
+                f"overlay=x=main_w*{x_value:.6f}:y=main_h*{y_value:.6f}:"
+                f"enable='between(t,{start_seconds:.6f},{end_seconds:.6f})'{out_label}"
+            )
+            current_video = out_label
+            image_input_index += 1
+
+        for text_index, text_item in enumerate(text_overlays):
+            text_value = self._escape_drawtext_text(str(text_item.get("text", "")))
+            start_seconds = float(text_item.get("start", 0.0))
+            end_seconds = float(text_item.get("end", 0.0))
+            x_value = float(text_item.get("x", 0.0))
+            y_value = float(text_item.get("y", 0.0))
+            font_size = int(text_item.get("font_size", 24))
+            color = str(text_item.get("color", "FFFFFF")).strip().lstrip("#") or "FFFFFF"
+            out_label = f"[vtxt{text_index}]"
+            filter_parts.append(
+                f"{current_video}drawtext=text='{text_value}':"
+                f"x=(w-text_w)*{x_value:.6f}:y=(h-text_h)*{y_value:.6f}:"
+                f"fontsize={font_size}:fontcolor={color}:"
+                f"enable='between(t,{start_seconds:.6f},{end_seconds:.6f})'{out_label}"
+            )
+            current_video = out_label
+
+        if not filter_parts:
+            raise RuntimeError("Yazi/PNG katmani aktif ancak gecerli filtre olusturulamadi.")
+
+        command.extend(
+            [
+                "-filter_complex",
+                ";".join(filter_parts),
+                "-map",
+                current_video,
+                "-c:v",
+                "libx264",
+                "-preset",
+                self.preset,
+                "-crf",
+                str(self.crf),
+            ]
+        )
+        if has_audio:
+            command.extend(["-map", "0:a?", "-c:a", "alac"])
+        command.extend(["-movflags", "+faststart", output_path])
+        return command
+
+    def _build_external_audio_mix_command(
+        self,
+        ffmpeg_binary: str,
+        input_path: str,
+        output_path: str,
+        has_audio: bool,
+        external_audio_tracks: Sequence[Mapping[str, Any]],
+    ) -> list[str]:
+        command = [
+            ffmpeg_binary,
+            "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
+            "-progress",
+            "pipe:1",
+            "-i",
+            input_path,
+        ]
+        for track_item in external_audio_tracks:
+            command.extend(["-i", str(track_item.get("path", "")).strip()])
+
+        filter_parts: list[str] = []
+        audio_inputs: list[str] = []
+        if has_audio:
+            filter_parts.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo[aorig]")
+            audio_inputs.append("[aorig]")
+
+        for track_index, track_item in enumerate(external_audio_tracks, start=1):
+            start_seconds = float(track_item.get("start", 0.0))
+            end_seconds_raw = track_item.get("end")
+            duration_expr = "atrim=0"
+            if end_seconds_raw is not None:
+                end_seconds = float(end_seconds_raw)
+                duration = max(0.0, end_seconds - start_seconds)
+                duration_expr = f"atrim=0:{duration:.6f}"
+            delay_ms = max(0, int(round(start_seconds * 1000.0)))
+            volume_value = float(track_item.get("volume", 1.0))
+            out_label = f"[aext{track_index}]"
+            filter_parts.append(
+                f"[{track_index}:a]{duration_expr},asetpts=PTS-STARTPTS,"
+                f"adelay={delay_ms}|{delay_ms},volume={volume_value:.6f},"
+                f"aformat=sample_rates=48000:channel_layouts=stereo{out_label}"
+            )
+            audio_inputs.append(out_label)
+
+        if not audio_inputs:
+            raise RuntimeError("Harici ses adimi icin ses girisi bulunamadi.")
+
+        if len(audio_inputs) == 1:
+            filter_parts.append(f"{audio_inputs[0]}alimiter=limit=0.95[aout]")
+        else:
+            mix_inputs = "".join(audio_inputs)
+            filter_parts.append(
+                f"{mix_inputs}amix=inputs={len(audio_inputs)}:normalize=0:dropout_transition=0,"
+                f"alimiter=limit=0.95[aout]"
+            )
+
+        command.extend(
+            [
+                "-filter_complex",
+                ";".join(filter_parts),
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "alac",
+                "-shortest",
+                "-movflags",
+                "+faststart",
+                output_path,
+            ]
+        )
+        return command
+
     def _build_speed_command(
         self,
         ffmpeg_binary: str,
@@ -604,6 +835,22 @@ class VideoEditWorker(QObject):
         if key == "phone":
             return "highpass=f=300,lowpass=f=3200,acompressor=threshold=-19dB:ratio=3:attack=5:release=50"
         return ""
+
+    @staticmethod
+    def _escape_drawtext_text(raw_text: str) -> str:
+        escaped = str(raw_text)
+        replacements = (
+            ("\\", r"\\"),
+            ("'", r"\'"),
+            (":", r"\:"),
+            ("%", r"\%"),
+            (",", r"\,"),
+            ("[", r"\["),
+            ("]", r"\]"),
+        )
+        for source, target in replacements:
+            escaped = escaped.replace(source, target)
+        return escaped
 
     @staticmethod
     def _build_atempo_filter(speed_factor: float) -> str:
