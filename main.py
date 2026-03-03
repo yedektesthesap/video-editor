@@ -1831,6 +1831,31 @@ class MainWindow(QMainWindow):
         self.edit_audio_effect_enabled_checkbox.setChecked(False)
         self.edit_audio_effect_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
 
+        edit_checkbox_style = """
+        QCheckBox {
+            spacing: 8px;
+            min-height: 26px;
+            color: #f3f6fb;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        QCheckBox::indicator {
+            width: 20px;
+            height: 20px;
+        }
+        QCheckBox:disabled {
+            color: #8e97a8;
+        }
+        """
+        for checkbox in (
+            self.edit_cut_enabled_checkbox,
+            self.edit_resize_enabled_checkbox,
+            self.edit_remove_audio_checkbox,
+            self.edit_speed_enabled_checkbox,
+            self.edit_audio_effect_enabled_checkbox,
+        ):
+            checkbox.setStyleSheet(edit_checkbox_style)
+
         effect_target_layout = QHBoxLayout()
         effect_target_layout.setContentsMargins(0, 0, 0, 0)
         effect_target_layout.addWidget(QLabel("Efekt:"))
