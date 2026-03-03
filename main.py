@@ -5,6 +5,7 @@ import colorsys
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -3224,7 +3225,18 @@ class MainWindow(QMainWindow):
             source_name = "video"
 
         timestamp_suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
-        return os.path.join(source_dir, f"{source_name}_cut{timestamp_suffix}.mp4")
+        cut_timestamp_pattern = re.compile(r"(?i)(?:_)?cut\d{8}-\d{6}")
+        cut_matches = list(cut_timestamp_pattern.finditer(source_name))
+        if cut_matches:
+            last_match = cut_matches[-1]
+            source_name = (
+                f"{source_name[:last_match.start()]}"
+                f"_cut{timestamp_suffix}"
+                f"{source_name[last_match.end():]}"
+            )
+        else:
+            source_name = f"{source_name}_cut{timestamp_suffix}"
+        return os.path.join(source_dir, f"{source_name}.mp4")
 
     @staticmethod
     def _suggest_non_conflicting_output_path(path: str) -> str:
