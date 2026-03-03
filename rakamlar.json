@@ -1,8 +1,8 @@
 {
   "type": "text_overlays",
   "version": "1.0",
-  "created_at": "2026-03-03T13:53:04.381811+00:00",
-  "source_video": "C:/Users/arge3/Downloads/VID_20260209_001147_cut20260303-093520.mp4",
+  "created_at": "2026-03-03T19:16:24.795264+00:00",
+  "source_video": "C:/Users/ysn_l/Downloads/VID_20260228_164909.mp4",
   "items": [
     {
       "text": "20%",
@@ -18,8 +18,8 @@
     },
     {
       "text": "40%",
-      "start": 0.0,
-      "end": 1.0,
+      "start": 1.0,
+      "end": 2.0,
       "x": 0.2,
       "y": 0.36,
       "font_size": 100,
@@ -30,8 +30,8 @@
     },
     {
       "text": "60%",
-      "start": 0.0,
-      "end": 1.0,
+      "start": 2.0,
+      "end": 3.0,
       "x": 0.2,
       "y": 0.53,
       "font_size": 100,
@@ -42,8 +42,8 @@
     },
     {
       "text": "80%",
-      "start": 0.0,
-      "end": 1.0,
+      "start": 3.0,
+      "end": 4.0,
       "x": 0.2,
       "y": 0.7,
       "font_size": 100,
@@ -54,51 +54,51 @@
     },
     {
       "text": "20%",
-      "start": 0.0,
-      "end": 1.0,
-      "x": 0.81,
+      "start": 4.0,
+      "end": 5.0,
+      "x": 0.83,
       "y": 0.195,
       "font_size": 100,
       "color": "#FFFFFF",
       "bold": true,
       "italic": true,
-      "position": "0.81, 0.195"
+      "position": "0.83, 0.195"
     },
     {
       "text": "40%",
-      "start": 0.0,
-      "end": 1.0,
-      "x": 0.82,
+      "start": 5.0,
+      "end": 6.0,
+      "x": 0.83,
       "y": 0.36,
       "font_size": 100,
       "color": "#FFFFFF",
       "bold": true,
       "italic": true,
-      "position": "0.82, 0.36"
+      "position": "0.83, 0.36"
     },
     {
       "text": "60%",
-      "start": 0.0,
-      "end": 1.0,
-      "x": 0.58,
+      "start": 6.0,
+      "end": 7.0,
+      "x": 0.83,
       "y": 0.53,
       "font_size": 100,
       "color": "#FFFFFF",
       "bold": true,
       "italic": true,
-      "position": "0.58, 0.53"
+      "position": "0.83, 0.53"
     },
     {
       "text": "80%",
-      "start": 0.0,
-      "end": 1.0,
-      "x": 0.75,
+      "start": 7.0,
+      "end": 8.0,
+      "x": 0.83,
       "y": 0.7,
       "font_size": 100,
       "color": "#FFFFFF",
       "bold": true,
       "italic": true,
-      "position": "0.75, 0.7"
+      "position": "0.83, 0.7"
     }
   ]
 }
