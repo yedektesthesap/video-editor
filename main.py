@@ -1842,6 +1842,13 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator {
             width: 20px;
             height: 20px;
+            background-color: #d6d9df;
+            border: 1px solid #9aa3b4;
+            border-radius: 4px;
+        }
+        QCheckBox::indicator:checked {
+            background-color: #d6d9df;
+            border: 1px solid #8590a3;
         }
         QCheckBox:disabled {
             color: #8e97a8;
