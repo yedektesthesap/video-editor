@@ -17,11 +17,13 @@ import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
+    QAbstractSpinBox,
     QAbstractItemView,
     QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGroupBox,
@@ -41,6 +43,7 @@ from PyQt6.QtWidgets import (
     QSlider,
     QSplitter,
     QSpinBox,
+    QStyledItemDelegate,
     QSizePolicy,
     QStackedWidget,
     QTableWidget,
@@ -1146,6 +1149,81 @@ class TimeOverlayProgressBar(QProgressBar):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, percent_text)
 
 
+class FloatSpinDelegate(QStyledItemDelegate):
+    def __init__(
+        self,
+        minimum: float,
+        maximum: float,
+        decimals: int,
+        single_step: float,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.minimum = float(minimum)
+        self.maximum = float(maximum)
+        self.decimals = max(0, int(decimals))
+        self.single_step = float(single_step)
+
+    def createEditor(self, parent, _option, _index):
+        editor = QDoubleSpinBox(parent)
+        editor.setFrame(False)
+        editor.setDecimals(self.decimals)
+        editor.setRange(self.minimum, self.maximum)
+        editor.setSingleStep(self.single_step)
+        editor.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.UpDownArrows)
+        return editor
+
+    def setEditorData(self, editor, index) -> None:
+        if not isinstance(editor, QDoubleSpinBox):
+            return
+        raw_value = index.model().data(index, Qt.ItemDataRole.EditRole)
+        try:
+            value = float(str(raw_value).strip())
+        except (TypeError, ValueError):
+            value = self.minimum
+        editor.setValue(max(self.minimum, min(self.maximum, value)))
+
+    def setModelData(self, editor, model, index) -> None:
+        if not isinstance(editor, QDoubleSpinBox):
+            return
+        value = float(editor.value())
+        text = f"{value:.{self.decimals}f}".rstrip("0").rstrip(".")
+        if not text:
+            text = "0"
+        model.setData(index, text, Qt.ItemDataRole.EditRole)
+
+
+class IntSpinDelegate(QStyledItemDelegate):
+    def __init__(self, minimum: int, maximum: int, single_step: int = 1, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.minimum = int(minimum)
+        self.maximum = int(maximum)
+        self.single_step = max(1, int(single_step))
+
+    def createEditor(self, parent, _option, _index):
+        editor = QSpinBox(parent)
+        editor.setFrame(False)
+        editor.setRange(self.minimum, self.maximum)
+        editor.setSingleStep(self.single_step)
+        editor.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.UpDownArrows)
+        return editor
+
+    def setEditorData(self, editor, index) -> None:
+        if not isinstance(editor, QSpinBox):
+            return
+        raw_value = index.model().data(index, Qt.ItemDataRole.EditRole)
+        try:
+            value = int(float(str(raw_value).strip()))
+        except (TypeError, ValueError):
+            value = self.minimum
+        editor.setValue(max(self.minimum, min(self.maximum, value)))
+
+    def setModelData(self, editor, model, index) -> None:
+        if not isinstance(editor, QSpinBox):
+            return
+        model.setData(index, str(int(editor.value())), Qt.ItemDataRole.EditRole)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1822,6 +1900,14 @@ class MainWindow(QMainWindow):
             self.edit_text_overlay_table,
             ["Metin", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Boyut(px)", "Renk(#RRGGBB)"],
         )
+        self.edit_text_time_delegate = FloatSpinDelegate(0.0, 86400.0, 3, 0.1, self.edit_text_overlay_table)
+        self.edit_text_xy_delegate = FloatSpinDelegate(0.0, 1.0, 4, 0.01, self.edit_text_overlay_table)
+        self.edit_text_size_delegate = IntSpinDelegate(8, 256, 1, self.edit_text_overlay_table)
+        self.edit_text_overlay_table.setItemDelegateForColumn(1, self.edit_text_time_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(2, self.edit_text_time_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(3, self.edit_text_xy_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(4, self.edit_text_xy_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(5, self.edit_text_size_delegate)
         self.edit_text_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
         self.edit_text_overlay_table.cellClicked.connect(self.on_edit_text_overlay_cell_clicked)
         text_overlay_layout.addWidget(self.edit_text_overlay_table)
@@ -2091,7 +2177,16 @@ class MainWindow(QMainWindow):
         self._update_edit_overlay_preview(force_frame_reload=False)
 
     def on_edit_text_overlay_cell_clicked(self, row: int, col: int) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        table = self.edit_text_overlay_table
         if col != 6:
+            if col in (1, 2, 3, 4, 5) and table.isEnabled():
+                item = table.item(row, col)
+                if item is None:
+                    item = QTableWidgetItem("")
+                    table.setItem(row, col, item)
+                table.editItem(item)
             return
         self._pick_text_overlay_color_for_row(row)
 
