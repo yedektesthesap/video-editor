@@ -2182,6 +2182,8 @@ class MainWindow(QMainWindow):
         table = self.edit_text_overlay_table
         if col != 6:
             if col in (1, 2, 3, 4, 5) and table.isEnabled():
+                if table.state() == QAbstractItemView.State.EditingState:
+                    return
                 item = table.item(row, col)
                 if item is None:
                     item = QTableWidgetItem("")
