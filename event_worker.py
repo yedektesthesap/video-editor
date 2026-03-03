@@ -598,6 +598,7 @@ class VideoEditWorker(QObject):
             out_label = f"[vtxt{text_index}]"
             filter_parts.append(
                 f"{current_video}drawtext=text='{text_value}':"
+                f"expansion=none:"
                 f"x=(w-text_w)*{x_value:.6f}:y=(h-text_h)*{y_value:.6f}:"
                 f"fontsize={font_size}:fontcolor={color}:"
                 f"enable='between(t,{start_seconds:.6f},{end_seconds:.6f})'{out_label}"
@@ -843,7 +844,6 @@ class VideoEditWorker(QObject):
             ("\\", r"\\"),
             ("'", r"\'"),
             (":", r"\:"),
-            ("%", r"\%"),
             (",", r"\,"),
             ("[", r"\["),
             ("]", r"\]"),
@@ -868,6 +868,26 @@ class VideoEditWorker(QObject):
         chain.append(f"atempo={working:.6f}")
         return ",".join(chain)
 
+    @staticmethod
+    def _subprocess_no_console_kwargs() -> dict[str, Any]:
+        if os.name != "nt":
+            return {}
+
+        kwargs: dict[str, Any] = {}
+        create_no_window = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if create_no_window:
+            kwargs["creationflags"] = create_no_window
+
+        startupinfo_factory = getattr(subprocess, "STARTUPINFO", None)
+        if startupinfo_factory is not None:
+            startupinfo = startupinfo_factory()
+            use_show_window = int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+            if use_show_window:
+                startupinfo.dwFlags |= use_show_window
+            startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+            kwargs["startupinfo"] = startupinfo
+        return kwargs
+
     def _run_ffmpeg_step(
         self,
         command: Sequence[str],
@@ -881,6 +901,7 @@ class VideoEditWorker(QObject):
         step_no = step_index + 1
 
         self.progress.emit(start_percent, f"{step_no}/{step_count} {step_label} basladi.")
+        subprocess_kwargs = self._subprocess_no_console_kwargs()
         process = subprocess.Popen(
             list(command),
             stdout=subprocess.PIPE,
@@ -889,6 +910,7 @@ class VideoEditWorker(QObject):
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            **subprocess_kwargs,
         )
         self._process = process
 
@@ -962,6 +984,7 @@ class VideoEditWorker(QObject):
             input_path,
         ]
         try:
+            subprocess_kwargs = self._subprocess_no_console_kwargs()
             completed = subprocess.run(
                 command,
                 capture_output=True,
@@ -970,6 +993,7 @@ class VideoEditWorker(QObject):
                 errors="replace",
                 check=False,
                 timeout=8,
+                **subprocess_kwargs,
             )
         except (OSError, subprocess.SubprocessError):
             return None
@@ -1009,6 +1033,7 @@ class VideoEditWorker(QObject):
                 input_path,
             ]
             try:
+                subprocess_kwargs = self._subprocess_no_console_kwargs()
                 completed = subprocess.run(
                     command,
                     capture_output=True,
@@ -1017,6 +1042,7 @@ class VideoEditWorker(QObject):
                     errors="replace",
                     check=False,
                     timeout=8,
+                    **subprocess_kwargs,
                 )
                 if completed.returncode == 0 and completed.stdout.strip():
                     return True
@@ -1025,6 +1051,7 @@ class VideoEditWorker(QObject):
 
         command = [ffmpeg_binary, "-hide_banner", "-i", input_path]
         try:
+            subprocess_kwargs = self._subprocess_no_console_kwargs()
             completed = subprocess.run(
                 command,
                 capture_output=True,
@@ -1033,6 +1060,7 @@ class VideoEditWorker(QObject):
                 errors="replace",
                 check=False,
                 timeout=8,
+                **subprocess_kwargs,
             )
         except (OSError, subprocess.SubprocessError):
             return False
