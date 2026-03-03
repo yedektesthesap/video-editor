@@ -1849,6 +1849,7 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator:checked {
             background-color: #d6d9df;
             border: 1px solid #8590a3;
+            image: url(checkbox_tick_black.svg);
         }
         QCheckBox:disabled {
             color: #8e97a8;
