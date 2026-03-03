@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -1822,6 +1823,7 @@ class MainWindow(QMainWindow):
             ["Metin", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Boyut(px)", "Renk(#RRGGBB)"],
         )
         self.edit_text_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
+        self.edit_text_overlay_table.cellDoubleClicked.connect(self.on_edit_text_overlay_cell_double_clicked)
         text_overlay_layout.addWidget(self.edit_text_overlay_table)
         text_button_layout = QHBoxLayout()
         text_button_layout.setContentsMargins(0, 0, 0, 0)
@@ -1829,8 +1831,11 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_add_button.clicked.connect(self.on_add_text_overlay_row_clicked)
         self.edit_text_overlay_remove_button = QPushButton("Satir Sil")
         self.edit_text_overlay_remove_button.clicked.connect(self.on_remove_text_overlay_row_clicked)
+        self.edit_text_overlay_pick_color_button = QPushButton("Renk Sec")
+        self.edit_text_overlay_pick_color_button.clicked.connect(self.on_pick_text_overlay_color_clicked)
         text_button_layout.addWidget(self.edit_text_overlay_add_button)
         text_button_layout.addWidget(self.edit_text_overlay_remove_button)
+        text_button_layout.addWidget(self.edit_text_overlay_pick_color_button)
         text_button_layout.addStretch(1)
         text_overlay_layout.addLayout(text_button_layout)
         top_layout.addWidget(self.edit_text_overlay_group)
@@ -2085,6 +2090,50 @@ class MainWindow(QMainWindow):
 
     def on_remove_text_overlay_row_clicked(self) -> None:
         self._remove_selected_table_row(self.edit_text_overlay_table)
+        self._update_edit_controls()
+        self._update_edit_overlay_preview(force_frame_reload=False)
+
+    def on_pick_text_overlay_color_clicked(self) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        table = self.edit_text_overlay_table
+        target_row = table.currentRow()
+        if target_row < 0 and table.rowCount() > 0:
+            target_row = table.rowCount() - 1
+        if target_row < 0:
+            QMessageBox.information(self, "Yazi Katmanlari", "Renk secmek icin once bir satir ekleyin.")
+            return
+        self._pick_text_overlay_color_for_row(target_row)
+
+    def on_edit_text_overlay_cell_double_clicked(self, row: int, col: int) -> None:
+        if col != 6:
+            return
+        self._pick_text_overlay_color_for_row(row)
+
+    def _pick_text_overlay_color_for_row(self, row: int) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        table = self.edit_text_overlay_table
+        if row < 0 or row >= table.rowCount():
+            return
+
+        current_value = self._edit_table_cell_text(table, row, 6).upper()
+        initial_color = QColor(current_value) if self._is_valid_hex_color(current_value) else QColor("#FFFFFF")
+        selected_color = QColorDialog.getColor(initial_color, self, "Yazi Rengi Sec")
+        if not selected_color.isValid():
+            return
+
+        hex_value = selected_color.name(QColor.NameFormat.HexRgb).upper()
+        table.blockSignals(True)
+        try:
+            item = table.item(row, 6)
+            if item is None:
+                item = QTableWidgetItem(hex_value)
+                table.setItem(row, 6, item)
+            else:
+                item.setText(hex_value)
+        finally:
+            table.blockSignals(False)
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
 
@@ -3349,6 +3398,9 @@ class MainWindow(QMainWindow):
             self.edit_text_overlay_add_button.setEnabled((not is_running) and text_overlay_enabled)
         if hasattr(self, "edit_text_overlay_remove_button"):
             self.edit_text_overlay_remove_button.setEnabled((not is_running) and text_overlay_enabled)
+        if hasattr(self, "edit_text_overlay_pick_color_button"):
+            has_text_rows = hasattr(self, "edit_text_overlay_table") and self.edit_text_overlay_table.rowCount() > 0
+            self.edit_text_overlay_pick_color_button.setEnabled((not is_running) and text_overlay_enabled and has_text_rows)
         if hasattr(self, "edit_image_overlay_enabled_checkbox"):
             self.edit_image_overlay_enabled_checkbox.setEnabled(not is_running)
         if hasattr(self, "edit_image_overlay_table"):
