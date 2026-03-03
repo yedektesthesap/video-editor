@@ -1189,6 +1189,8 @@ class MainWindow(QMainWindow):
         self._color_analysis_cancel_requested = False
         self._video_edit_cancel_requested = False
         self._video_edit_started_monotonic: Optional[float] = None
+        self._edit_preview_cached_seconds: Optional[float] = None
+        self._edit_preview_cached_frame_bgr: Optional[np.ndarray] = None
         self.detection_mode: Optional[str] = None
         self.timeline_dirty = False
         self.startup_tab: Optional[QWidget] = None
@@ -1825,6 +1827,29 @@ class MainWindow(QMainWindow):
         text_button_layout.addWidget(self.edit_text_overlay_remove_button)
         text_button_layout.addStretch(1)
         text_overlay_layout.addLayout(text_button_layout)
+        text_preview_controls_layout = QHBoxLayout()
+        text_preview_controls_layout.setContentsMargins(0, 0, 0, 0)
+        text_preview_controls_layout.setSpacing(6)
+        text_preview_controls_layout.addWidget(QLabel("Onizleme Zamani:"))
+        self.edit_text_preview_slider = QSlider(Qt.Orientation.Horizontal)
+        self.edit_text_preview_slider.setRange(0, 0)
+        self.edit_text_preview_slider.setTracking(True)
+        self.edit_text_preview_slider.valueChanged.connect(self.on_edit_text_preview_slider_changed)
+        text_preview_controls_layout.addWidget(self.edit_text_preview_slider, stretch=1)
+        self.edit_text_preview_time_label = QLabel("0.00 / 0.00 sn")
+        self.edit_text_preview_time_label.setMinimumWidth(130)
+        self.edit_text_preview_time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        text_preview_controls_layout.addWidget(self.edit_text_preview_time_label)
+        text_overlay_layout.addLayout(text_preview_controls_layout)
+        self.edit_text_preview_label = QLabel("Video secildiginde yazi onizlemesi burada gorunecek.")
+        self.edit_text_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.edit_text_preview_label.setMinimumSize(280, 180)
+        self.edit_text_preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.edit_text_preview_label.setStyleSheet("border: 1px solid #666; background: #111; color: #aaa;")
+        text_overlay_layout.addWidget(self.edit_text_preview_label, stretch=1)
+        self.edit_text_preview_status_label = QLabel("Yazi konumu canli olarak burada izlenir.")
+        self.edit_text_preview_status_label.setStyleSheet("color: #9aa4b7;")
+        text_overlay_layout.addWidget(self.edit_text_preview_status_label)
         top_layout.addWidget(self.edit_text_overlay_group)
 
         self.edit_image_overlay_group = QGroupBox("PNG Katmanlari")
@@ -1995,6 +2020,8 @@ class MainWindow(QMainWindow):
         self._refresh_edit_resolution_options()
         self._update_edit_quality_tooltips()
         self._update_edit_controls()
+        self._refresh_edit_text_preview_range(set_to_current_frame=False)
+        self._update_edit_text_preview(force_frame_reload=True)
 
     def _configure_edit_overlay_table(self, table: QTableWidget, headers: list[str]) -> None:
         table.setColumnCount(len(headers))
@@ -2014,6 +2041,7 @@ class MainWindow(QMainWindow):
 
     def _on_edit_overlay_table_changed(self, *_args: object) -> None:
         self._update_edit_controls()
+        self._update_edit_text_preview(force_frame_reload=False)
 
     @staticmethod
     def _set_table_row_values(table: QTableWidget, row_values: list[str]) -> None:
@@ -2040,10 +2068,12 @@ class MainWindow(QMainWindow):
         finally:
             self.edit_text_overlay_table.blockSignals(False)
         self._update_edit_controls()
+        self._update_edit_text_preview(force_frame_reload=False)
 
     def on_remove_text_overlay_row_clicked(self) -> None:
         self._remove_selected_table_row(self.edit_text_overlay_table)
         self._update_edit_controls()
+        self._update_edit_text_preview(force_frame_reload=False)
 
     def on_add_image_overlay_row_clicked(self) -> None:
         self.edit_image_overlay_table.blockSignals(True)
@@ -2074,6 +2104,198 @@ class MainWindow(QMainWindow):
     def on_remove_external_audio_row_clicked(self) -> None:
         self._remove_selected_table_row(self.edit_external_audio_table)
         self._update_edit_controls()
+
+    def on_edit_text_preview_slider_changed(self, *_args: object) -> None:
+        self._update_edit_text_preview_time_label()
+        self._update_edit_text_preview(force_frame_reload=False)
+
+    def _clear_edit_text_preview_cache(self) -> None:
+        self._edit_preview_cached_seconds = None
+        self._edit_preview_cached_frame_bgr = None
+
+    def _edit_preview_duration_seconds(self) -> float:
+        if self.video_meta is None:
+            return 0.0
+        fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 0.0
+        if fps <= 0.0:
+            return 0.0
+        frame_count = int(self.video_frame_count)
+        if frame_count <= 0:
+            frame_count = max(1, int(self.video_meta.frame_index) + 1)
+        return max(0.0, float(frame_count - 1) / fps)
+
+    def _current_video_frame_seconds(self) -> float:
+        if self.video_meta is None:
+            return 0.0
+        fps = float(self.video_meta.fps) if self.video_meta.fps > 0 else 0.0
+        if fps <= 0.0:
+            return 0.0
+        return max(0.0, float(self.video_meta.frame_index) / fps)
+
+    def _current_edit_preview_seconds(self) -> float:
+        if not hasattr(self, "edit_text_preview_slider"):
+            return 0.0
+        return max(0.0, float(self.edit_text_preview_slider.value()) / 1000.0)
+
+    def _update_edit_text_preview_time_label(self, seconds: Optional[float] = None, duration: Optional[float] = None) -> None:
+        if not hasattr(self, "edit_text_preview_time_label"):
+            return
+        if seconds is None:
+            seconds = self._current_edit_preview_seconds()
+        if duration is None:
+            duration = self._edit_preview_duration_seconds()
+        safe_seconds = max(0.0, float(seconds))
+        safe_duration = max(0.0, float(duration))
+        self.edit_text_preview_time_label.setText(f"{safe_seconds:.2f} / {safe_duration:.2f} sn")
+
+    def _refresh_edit_text_preview_range(self, set_to_current_frame: bool) -> None:
+        if not hasattr(self, "edit_text_preview_slider"):
+            return
+        has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
+        duration = self._edit_preview_duration_seconds() if has_video else 0.0
+        max_value = max(0, int(round(duration * 1000.0)))
+        current_value = self.edit_text_preview_slider.value()
+        target_value = max(0, min(max_value, int(current_value)))
+        if has_video and set_to_current_frame:
+            current_seconds = min(duration, self._current_video_frame_seconds())
+            target_value = max(0, min(max_value, int(round(current_seconds * 1000.0))))
+
+        self.edit_text_preview_slider.blockSignals(True)
+        try:
+            self.edit_text_preview_slider.setRange(0, max_value)
+            self.edit_text_preview_slider.setEnabled(has_video and max_value > 0)
+            self.edit_text_preview_slider.setValue(target_value)
+        finally:
+            self.edit_text_preview_slider.blockSignals(False)
+
+        self._update_edit_text_preview_time_label(
+            seconds=float(target_value) / 1000.0 if max_value > 0 else 0.0,
+            duration=duration,
+        )
+
+    def _set_edit_text_preview_pixmap(self, pixmap: Optional[QPixmap]) -> None:
+        if not hasattr(self, "edit_text_preview_label"):
+            return
+        if pixmap is None:
+            self.edit_text_preview_label.clear()
+            self.edit_text_preview_label.setText("Video secildiginde yazi onizlemesi burada gorunecek.")
+            return
+        target_width = max(1, self.edit_text_preview_label.width() - 10)
+        target_height = max(1, self.edit_text_preview_label.height() - 10)
+        scaled = pixmap.scaled(
+            target_width,
+            target_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.edit_text_preview_label.setPixmap(scaled)
+
+    def _draw_text_overlays_on_pixmap(
+        self,
+        base_pixmap: QPixmap,
+        text_overlays: list[dict],
+        preview_seconds: float,
+    ) -> Tuple[QPixmap, int]:
+        rendered = QPixmap(base_pixmap)
+        painter = QPainter(rendered)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        canvas_width = rendered.width()
+        canvas_height = rendered.height()
+        active_count = 0
+
+        for overlay in text_overlays:
+            try:
+                start_seconds = float(overlay.get("start", 0.0))
+                end_seconds = float(overlay.get("end", 0.0))
+            except (TypeError, ValueError):
+                continue
+            if preview_seconds < start_seconds or preview_seconds > end_seconds:
+                continue
+
+            text_value = str(overlay.get("text", ""))
+            if not text_value:
+                continue
+
+            active_count += 1
+            font_size = max(8, int(overlay.get("font_size", 24)))
+            font = painter.font()
+            font.setPixelSize(font_size)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            text_width = metrics.horizontalAdvance(text_value)
+            text_height = metrics.height()
+            draw_x = int(round((canvas_width - text_width) * float(overlay.get("x", 0.0))))
+            draw_y_top = int(round((canvas_height - text_height) * float(overlay.get("y", 0.0))))
+            baseline = draw_y_top + metrics.ascent()
+            color_value = str(overlay.get("color", "#FFFFFF")).strip() or "#FFFFFF"
+            pen_color = QColor(color_value)
+            if not pen_color.isValid():
+                pen_color = QColor("#FFFFFF")
+            painter.setPen(pen_color)
+            painter.drawText(draw_x, baseline, text_value)
+
+        painter.end()
+        return rendered, active_count
+
+    def _update_edit_text_preview(self, force_frame_reload: bool) -> None:
+        if not hasattr(self, "edit_text_preview_label"):
+            return
+        if not hasattr(self, "edit_text_preview_status_label"):
+            return
+
+        has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
+        if not has_video:
+            self._clear_edit_text_preview_cache()
+            self._set_edit_text_preview_pixmap(None)
+            self.edit_text_preview_status_label.setText("Onizleme icin once video secin.")
+            self._update_edit_text_preview_time_label(seconds=0.0, duration=0.0)
+            return
+
+        duration = self._edit_preview_duration_seconds()
+        preview_seconds = min(duration, self._current_edit_preview_seconds())
+        self._update_edit_text_preview_time_label(seconds=preview_seconds, duration=duration)
+
+        needs_reload = force_frame_reload or self._edit_preview_cached_frame_bgr is None
+        if not needs_reload and self._edit_preview_cached_seconds is not None:
+            needs_reload = abs(float(self._edit_preview_cached_seconds) - preview_seconds) > 0.0005
+
+        if needs_reload:
+            frame_payload = self._read_video_frame_at_seconds(preview_seconds)
+            if frame_payload is None:
+                self._clear_edit_text_preview_cache()
+                self._set_edit_text_preview_pixmap(None)
+                self.edit_text_preview_status_label.setText("Onizleme frame'i okunamadi.")
+                return
+            frame_bgr, _ = frame_payload
+            self._edit_preview_cached_frame_bgr = frame_bgr
+            self._edit_preview_cached_seconds = preview_seconds
+
+        if self._edit_preview_cached_frame_bgr is None:
+            self._set_edit_text_preview_pixmap(None)
+            self.edit_text_preview_status_label.setText("Onizleme frame'i hazir degil.")
+            return
+
+        preview_rgb = cv2.cvtColor(self._edit_preview_cached_frame_bgr, cv2.COLOR_BGR2RGB)
+        base_pixmap = numpy_rgb_to_qpixmap(preview_rgb)
+        rendered_pixmap = base_pixmap
+        status_message = "Yazi katmani kapali."
+
+        if self._is_edit_text_overlay_enabled():
+            text_overlays, text_error = self._collect_text_overlays()
+            if text_error is not None:
+                status_message = f"Yazi onizleme hatasi: {text_error}"
+            elif not text_overlays:
+                status_message = "Yazi katmani acik ama gecerli satir yok."
+            else:
+                rendered_pixmap, active_count = self._draw_text_overlays_on_pixmap(
+                    base_pixmap=base_pixmap,
+                    text_overlays=text_overlays,
+                    preview_seconds=preview_seconds,
+                )
+                status_message = f"Aktif yazi: {active_count}/{len(text_overlays)}"
+
+        self._set_edit_text_preview_pixmap(rendered_pixmap)
+        self.edit_text_preview_status_label.setText(status_message)
 
     def _setup_shortcuts(self) -> None:
         for index in range(1, MAX_SHORTCUT_ROIS + 1):
@@ -2387,6 +2609,8 @@ class MainWindow(QMainWindow):
             if error:
                 self._append_edit_log(f"Cut nedeni: {error}")
         self._update_edit_controls()
+        self._refresh_edit_text_preview_range(set_to_current_frame=True)
+        self._update_edit_text_preview(force_frame_reload=True)
         self.switch_to_edit_tab()
 
     def on_edit_output_browse_clicked(self) -> None:
@@ -2416,6 +2640,7 @@ class MainWindow(QMainWindow):
 
     def _on_edit_operation_checkbox_changed(self, *_args: object) -> None:
         self._update_edit_controls()
+        self._update_edit_text_preview(force_frame_reload=False)
 
     def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
         if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
@@ -2564,9 +2789,13 @@ class MainWindow(QMainWindow):
         if self.video_meta is None:
             self.edit_source_video_label.setText("Kaynak video: -")
             self._refresh_edit_resolution_options()
+            self._refresh_edit_text_preview_range(set_to_current_frame=False)
+            self._update_edit_text_preview(force_frame_reload=True)
             return
         self.edit_source_video_label.setText(f"Kaynak video: {self.video_meta.source_video}")
         self._refresh_edit_resolution_options()
+        self._refresh_edit_text_preview_range(set_to_current_frame=False)
+        self._update_edit_text_preview(force_frame_reload=True)
 
     @staticmethod
     def _format_edit_fps_value(value: float) -> str:
