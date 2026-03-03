@@ -74,6 +74,8 @@ EDIT_TEXT_COL_END = 2
 EDIT_TEXT_COL_POSITION = 3
 EDIT_TEXT_COL_SIZE = 4
 EDIT_TEXT_COL_COLOR = 5
+EDIT_TEXT_COL_BOLD = 6
+EDIT_TEXT_COL_ITALIC = 7
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
@@ -1901,10 +1903,10 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_enabled_checkbox.setChecked(False)
         self.edit_text_overlay_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
         text_overlay_layout.addWidget(self.edit_text_overlay_enabled_checkbox)
-        self.edit_text_overlay_table = QTableWidget(0, 6)
+        self.edit_text_overlay_table = QTableWidget(0, 8)
         self._configure_edit_overlay_table(
             self.edit_text_overlay_table,
-            ["Metin", "Baslangic(sn)", "Bitis(sn)", "Pozisyon(X,Y)", "Boyut(px)", "Renk(#RRGGBB)"],
+            ["Metin", "Baslangic(sn)", "Bitis(sn)", "Pozisyon(X,Y)", "Boyut(px)", "Renk(#RRGGBB)", "Bold", "Italik"],
         )
         self.edit_text_time_delegate = FloatSpinDelegate(0.0, 86400.0, 3, 0.1, self.edit_text_overlay_table)
         self.edit_text_size_delegate = IntSpinDelegate(8, 256, 1, self.edit_text_overlay_table)
@@ -2169,12 +2171,81 @@ class MainWindow(QMainWindow):
         if current_row >= 0:
             table.removeRow(current_row)
 
+    def _set_text_overlay_style_cell(self, row: int, col: int, checked: bool) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        table = self.edit_text_overlay_table
+        if row < 0 or row >= table.rowCount():
+            return
+        item = table.item(row, col)
+        if item is None:
+            item = QTableWidgetItem("")
+            table.setItem(row, col, item)
+        item_flags = item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        item_flags &= ~Qt.ItemFlag.ItemIsEditable
+        item.setFlags(item_flags)
+        item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+
+    def _text_overlay_style_value(self, row: int, col: int) -> bool:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return False
+        table = self.edit_text_overlay_table
+        if row < 0 or row >= table.rowCount():
+            return False
+        item = table.item(row, col)
+        if item is None:
+            return False
+        return item.checkState() == Qt.CheckState.Checked
+
+    @staticmethod
+    def _parse_overlay_bool(raw_value: object, default: bool = False) -> bool:
+        if raw_value is None:
+            return bool(default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value) != 0.0
+        text = str(raw_value).strip().lower()
+        if text in ("1", "true", "yes", "evet", "on"):
+            return True
+        if text in ("0", "false", "no", "hayir", "off", ""):
+            return False
+        return bool(default)
+
+    def _append_text_overlay_row(
+        self,
+        text_value: str,
+        start_value: str,
+        end_value: str,
+        position_value: str,
+        size_value: str,
+        color_value: str,
+        bold: bool = False,
+        italic: bool = False,
+    ) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        table = self.edit_text_overlay_table
+        self._set_table_row_values(
+            table,
+            [text_value, start_value, end_value, position_value, size_value, color_value, "", ""],
+        )
+        row = table.rowCount() - 1
+        self._set_text_overlay_style_cell(row, EDIT_TEXT_COL_BOLD, checked=bold)
+        self._set_text_overlay_style_cell(row, EDIT_TEXT_COL_ITALIC, checked=italic)
+
     def on_add_text_overlay_row_clicked(self) -> None:
         self.edit_text_overlay_table.blockSignals(True)
         try:
-            self._set_table_row_values(
-                self.edit_text_overlay_table,
-                ["ornek yazi", "0.0", "1.0", "0.05, 0.05", "36", "#FFFFFF"],
+            self._append_text_overlay_row(
+                text_value="ornek yazi",
+                start_value="0.0",
+                end_value="1.0",
+                position_value="0.05, 0.05",
+                size_value="36",
+                color_value="#FFFFFF",
+                bold=False,
+                italic=False,
             )
         finally:
             self.edit_text_overlay_table.blockSignals(False)
@@ -2285,7 +2356,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Yazi Katmanlari", "Dosya formati gecersiz: yazi listesi bulunamadi.")
             return
 
-        imported_rows: list[list[str]] = []
+        imported_rows: list[tuple[list[str], bool, bool]] = []
         for index, raw_item in enumerate(raw_items, start=1):
             if not isinstance(raw_item, dict):
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Veri dict formatinda olmali.")
@@ -2339,23 +2410,39 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Renk #RRGGBB formatinda olmali.")
                 return
 
+            bold_value = self._parse_overlay_bool(raw_item.get("bold", False), default=False)
+            italic_value = self._parse_overlay_bool(raw_item.get("italic", False), default=False)
+
             imported_rows.append(
-                [
-                    text_value,
-                    self._format_overlay_number(start_seconds, 3),
-                    self._format_overlay_number(end_seconds, 3),
-                    self._format_text_overlay_position(x_value, y_value),
-                    str(font_size),
-                    color_value,
-                ]
+                (
+                    [
+                        text_value,
+                        self._format_overlay_number(start_seconds, 3),
+                        self._format_overlay_number(end_seconds, 3),
+                        self._format_text_overlay_position(x_value, y_value),
+                        str(font_size),
+                        color_value,
+                    ],
+                    bold_value,
+                    italic_value,
+                )
             )
 
         table = self.edit_text_overlay_table
         table.blockSignals(True)
         try:
             table.setRowCount(0)
-            for row_values in imported_rows:
-                self._set_table_row_values(table, row_values)
+            for row_values, bold_value, italic_value in imported_rows:
+                self._append_text_overlay_row(
+                    text_value=row_values[0],
+                    start_value=row_values[1],
+                    end_value=row_values[2],
+                    position_value=row_values[3],
+                    size_value=row_values[4],
+                    color_value=row_values[5],
+                    bold=bold_value,
+                    italic=italic_value,
+                )
         finally:
             table.blockSignals(False)
 
@@ -2370,6 +2457,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "edit_text_overlay_table"):
             return
         table = self.edit_text_overlay_table
+        if col in (EDIT_TEXT_COL_BOLD, EDIT_TEXT_COL_ITALIC):
+            self._update_edit_controls()
+            self._update_edit_overlay_preview(force_frame_reload=False)
+            return
         if col != EDIT_TEXT_COL_COLOR:
             if col in (EDIT_TEXT_COL_START, EDIT_TEXT_COL_END, EDIT_TEXT_COL_SIZE) and table.isEnabled():
                 if table.state() == QAbstractItemView.State.EditingState:
@@ -2641,6 +2732,8 @@ class MainWindow(QMainWindow):
             font_size = max(8, int(overlay.get("font_size", 24)))
             font = painter.font()
             font.setPixelSize(font_size)
+            font.setBold(bool(overlay.get("bold", False)))
+            font.setItalic(bool(overlay.get("italic", False)))
             painter.setFont(font)
             metrics = painter.fontMetrics()
             text_width = metrics.horizontalAdvance(text_value)
@@ -3291,6 +3384,8 @@ class MainWindow(QMainWindow):
             position_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_POSITION)
             font_size_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_SIZE)
             color_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_COLOR)
+            bold_enabled = self._text_overlay_style_value(row, EDIT_TEXT_COL_BOLD)
+            italic_enabled = self._text_overlay_style_value(row, EDIT_TEXT_COL_ITALIC)
 
             row_values = [text_value, start_raw, end_raw, position_raw, font_size_raw, color_raw]
             if not any(row_values):
@@ -3335,6 +3430,8 @@ class MainWindow(QMainWindow):
                     "y": round(y_value, 6),
                     "font_size": int(font_size),
                     "color": color_value,
+                    "bold": bool(bold_enabled),
+                    "italic": bool(italic_enabled),
                 }
             )
         return overlays, None
