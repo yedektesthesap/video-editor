@@ -1,0 +1,79 @@
+{
+  "source_video": "C:/Users/Broke/Downloads/VID_20260201_222033 (1).mp4",
+  "template_path": "C:/Users/Broke/Desktop/YSN/workspace/video-editor/template1.json",
+  "sample_hz": 10,
+  "events": [
+    {
+      "id": 1,
+      "name": "sol1_to_mix1",
+      "target_roi": "mix1",
+      "type": "pour",
+      "start": 0.0,
+      "end": 10.0,
+      "confidence": null
+    },
+    {
+      "id": 2,
+      "name": "sol2_to_mix2",
+      "target_roi": "mix2",
+      "type": "pour",
+      "start": 20.0,
+      "end": 30.01,
+      "confidence": null
+    },
+    {
+      "id": 3,
+      "name": "sol3_to_mix3",
+      "target_roi": "mix3",
+      "type": "pour",
+      "start": 39.99,
+      "end": 49.97,
+      "confidence": null
+    },
+    {
+      "id": 4,
+      "name": "sol4_to_mix4",
+      "target_roi": "mix4",
+      "type": "pour",
+      "start": 59.99,
+      "end": 70.0,
+      "confidence": null
+    },
+    {
+      "id": 5,
+      "name": "sag4_to_mix4_mix",
+      "target_roi": "mix4",
+      "type": "pour_mix",
+      "start": 9.0,
+      "end": 10.0,
+      "confidence": null
+    },
+    {
+      "id": 6,
+      "name": "sag3_to_mix3_mix",
+      "target_roi": "mix3",
+      "type": "pour_mix",
+      "start": 11.0,
+      "end": 11.99,
+      "confidence": null
+    },
+    {
+      "id": 7,
+      "name": "sag2_to_mix2_mix",
+      "target_roi": "mix2",
+      "type": "pour_mix",
+      "start": 12.99,
+      "end": 13.99,
+      "confidence": null
+    },
+    {
+      "id": 8,
+      "name": "sag1_to_mix1_mix",
+      "target_roi": "mix1",
+      "type": "pour_mix",
+      "start": 14.99,
+      "end": 15.99,
+      "confidence": null
+    }
+  ]
+}
