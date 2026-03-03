@@ -1714,9 +1714,9 @@ class MainWindow(QMainWindow):
         output_header_layout = QHBoxLayout(output_header_widget)
         output_header_layout.setContentsMargins(0, 0, 0, 0)
         output_header_layout.setSpacing(6)
-        output_header_layout.addWidget(QLabel("Cikti Dosyasi:"))
+        output_header_layout.addWidget(QLabel("Cikti Klasoru:"))
         self.edit_output_path_edit = QLineEdit()
-        self.edit_output_path_edit.setPlaceholderText("Cikti dosya yolu")
+        self.edit_output_path_edit.setPlaceholderText("Cikti klasor yolu")
         self.edit_output_path_edit.setMinimumWidth(360)
         self.edit_output_path_edit.textChanged.connect(self._update_edit_controls)
         self.edit_output_browse_button = QPushButton("Gozat")
@@ -2180,16 +2180,7 @@ class MainWindow(QMainWindow):
         self._update_edit_video_label()
         self._refresh_edit_resolution_options()
         self._update_edit_segments_label()
-        self.edit_output_path_edit.setText(
-            self._default_edit_output_path(
-                source_video=source_path,
-                enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
-                enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
-                remove_audio=self._is_edit_remove_audio_enabled(),
-                enable_speed=self._is_edit_speed_enabled(),
-                enable_audio_effect=self._is_edit_audio_effect_enabled(),
-            )
-        )
+        self.edit_output_path_edit.setText(self._default_edit_output_directory(source_path))
         self.edit_progress.setValue(0)
         self._reset_edit_progress_time_fields()
         self.edit_log.clear()
@@ -2206,27 +2197,17 @@ class MainWindow(QMainWindow):
         if self.video_meta is None:
             QMessageBox.warning(self, "Edit", "Once bir video acin.")
             return
-        base_output = self.edit_output_path_edit.text().strip()
-        if not base_output:
-            base_output = self._default_edit_output_path(
-                source_video=self.video_meta.source_video,
-                enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
-                enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
-                remove_audio=self._is_edit_remove_audio_enabled(),
-                enable_speed=self._is_edit_speed_enabled(),
-                enable_audio_effect=self._is_edit_audio_effect_enabled(),
-            )
-        save_path, _ = QFileDialog.getSaveFileName(
+        base_dir = self.edit_output_path_edit.text().strip()
+        if not base_dir:
+            base_dir = self._default_edit_output_directory(self.video_meta.source_video)
+        selected_dir = QFileDialog.getExistingDirectory(
             self,
-            "Cikti Video Kaydet",
-            base_output,
-            "MP4 Files (*.mp4);;All Files (*.*)",
+            "Cikti Klasoru Sec",
+            base_dir,
         )
-        if not save_path:
+        if not selected_dir:
             return
-        if not save_path.lower().endswith(".mp4"):
-            save_path += ".mp4"
-        self.edit_output_path_edit.setText(save_path)
+        self.edit_output_path_edit.setText(selected_dir)
         self._update_edit_controls()
 
     def on_edit_run_button_clicked(self) -> None:
@@ -2238,39 +2219,6 @@ class MainWindow(QMainWindow):
         self.start_video_edit()
 
     def _on_edit_operation_checkbox_changed(self, *_args: object) -> None:
-        if self.video_meta is not None and os.path.isfile(self.video_meta.source_video):
-            source_path = self.video_meta.source_video
-            current_output = self.edit_output_path_edit.text().strip()
-            auto_outputs: set[str] = set()
-            for flag_cut in (False, True):
-                for flag_resize in (False, True):
-                    for flag_remove_audio in (False, True):
-                        for flag_speed in (False, True):
-                            for flag_effect in (False, True):
-                                auto_outputs.add(
-                                    os.path.abspath(
-                                        self._default_edit_output_path(
-                                            source_video=source_path,
-                                            enable_cut=flag_cut,
-                                            enable_resize=flag_resize,
-                                            remove_audio=flag_remove_audio,
-                                            enable_speed=flag_speed,
-                                            enable_audio_effect=flag_effect,
-                                        )
-                                    )
-                                )
-            if not current_output or os.path.abspath(current_output) in auto_outputs:
-                self.edit_output_path_edit.setText(
-                    self._default_edit_output_path(
-                        source_video=source_path,
-                        enable_cut=self.edit_cut_enabled_checkbox.isChecked(),
-                        enable_resize=self.edit_resize_enabled_checkbox.isChecked(),
-                        remove_audio=self._is_edit_remove_audio_enabled(),
-                        enable_speed=self._is_edit_speed_enabled(),
-                        enable_audio_effect=self._is_edit_audio_effect_enabled(),
-                    )
-                )
-
         self._update_edit_controls()
 
     def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
@@ -2313,16 +2261,17 @@ class MainWindow(QMainWindow):
             return None, "Gecerli kesim araligi bulunamadi."
         return merged_segments, None
 
-    def _default_edit_output_path(
-        self,
-        source_video: str,
-        enable_cut: bool,
-        enable_resize: bool,
-        remove_audio: bool = False,
-        enable_speed: bool = False,
-        enable_audio_effect: bool = False,
-    ) -> str:
-        source_dir = os.path.dirname(source_video)
+    @staticmethod
+    def _default_edit_output_directory(source_video: str) -> str:
+        source_dir = os.path.dirname(os.path.abspath(source_video))
+        if source_dir and os.path.isdir(source_dir):
+            return source_dir
+        return os.getcwd()
+
+    def _default_edit_output_path(self, source_video: str, output_directory: str) -> str:
+        source_dir = str(output_directory).strip()
+        if not source_dir:
+            source_dir = self._default_edit_output_directory(source_video)
         source_name = os.path.splitext(os.path.basename(source_video))[0].strip()
         if not source_name:
             source_name = "video"
@@ -2657,7 +2606,8 @@ class MainWindow(QMainWindow):
             return
         is_running = self._is_video_edit_running()
         has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
-        output_path = self.edit_output_path_edit.text().strip()
+        output_directory = self.edit_output_path_edit.text().strip()
+        output_directory_ready = bool(output_directory) and os.path.isdir(output_directory)
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio_enabled = self._is_edit_remove_audio_enabled()
@@ -2693,7 +2643,7 @@ class MainWindow(QMainWindow):
         analysis_running = self._is_event_detection_running() or self._is_color_analysis_running()
         can_run = (
             has_video
-            and bool(output_path)
+            and output_directory_ready
             and has_selected_operation
             and has_effective_operation
             and cut_ready
@@ -2830,28 +2780,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Edit", "Secilen ayarlarda uygulanacak bir islem bulunamadi.")
             return
 
-        output_path = self.edit_output_path_edit.text().strip()
-        if not output_path:
-            output_path = self._default_edit_output_path(
-                source_video=self.video_meta.source_video,
-                enable_cut=cut_enabled,
-                enable_resize=resize_enabled,
-                remove_audio=remove_audio,
-                enable_speed=speed_enabled,
-                enable_audio_effect=audio_effect_enabled,
-            )
-            self.edit_output_path_edit.setText(output_path)
-        output_path = output_path.strip()
-        if not output_path:
-            QMessageBox.warning(self, "Edit", "Cikti dosya yolu bos olamaz.")
-            return
-        if not output_path.lower().endswith(".mp4"):
-            output_path += ".mp4"
-            self.edit_output_path_edit.setText(output_path)
-        output_dir = os.path.dirname(output_path)
-        if output_dir and not os.path.isdir(output_dir):
+        output_directory = self.edit_output_path_edit.text().strip()
+        if not output_directory:
+            output_directory = self._default_edit_output_directory(self.video_meta.source_video)
+            self.edit_output_path_edit.setText(output_directory)
+        if not os.path.isdir(output_directory):
             QMessageBox.warning(self, "Edit", "Cikti klasoru bulunamadi.")
             return
+        output_path = self._default_edit_output_path(
+            source_video=self.video_meta.source_video,
+            output_directory=output_directory,
+        )
 
         source_path = self.video_meta.source_video
         if os.path.abspath(source_path) == os.path.abspath(output_path):
@@ -2863,12 +2802,12 @@ class MainWindow(QMainWindow):
             if renamed_output is None:
                 return
             output_path = renamed_output
-            self.edit_output_path_edit.setText(output_path)
 
         output_dir = os.path.dirname(output_path)
         if output_dir and not os.path.isdir(output_dir):
             QMessageBox.warning(self, "Edit", "Cikti klasoru bulunamadi.")
             return
+        self.edit_output_path_edit.setText(output_dir or output_directory)
         if os.path.abspath(source_path) == os.path.abspath(output_path):
             QMessageBox.warning(self, "Edit", "Cikti dosyasi kaynak video ile ayni olamaz.")
             return
