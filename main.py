@@ -14,8 +14,8 @@ from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
+from PyQt6.QtCore import QEvent, QPointF, QRectF, QSettings, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QImage, QKeyEvent, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QAbstractItemView,
@@ -68,6 +68,12 @@ SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 SETTINGS_FFMPEG_PATH = "ffmpeg_path"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
+EDIT_TEXT_COL_TEXT = 0
+EDIT_TEXT_COL_START = 1
+EDIT_TEXT_COL_END = 2
+EDIT_TEXT_COL_POSITION = 3
+EDIT_TEXT_COL_SIZE = 4
+EDIT_TEXT_COL_COLOR = 5
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
@@ -1895,21 +1901,19 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_enabled_checkbox.setChecked(False)
         self.edit_text_overlay_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
         text_overlay_layout.addWidget(self.edit_text_overlay_enabled_checkbox)
-        self.edit_text_overlay_table = QTableWidget(0, 7)
+        self.edit_text_overlay_table = QTableWidget(0, 6)
         self._configure_edit_overlay_table(
             self.edit_text_overlay_table,
-            ["Metin", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Boyut(px)", "Renk(#RRGGBB)"],
+            ["Metin", "Baslangic(sn)", "Bitis(sn)", "Pozisyon(X,Y)", "Boyut(px)", "Renk(#RRGGBB)"],
         )
         self.edit_text_time_delegate = FloatSpinDelegate(0.0, 86400.0, 3, 0.1, self.edit_text_overlay_table)
-        self.edit_text_xy_delegate = FloatSpinDelegate(0.0, 1.0, 4, 0.01, self.edit_text_overlay_table)
         self.edit_text_size_delegate = IntSpinDelegate(8, 256, 1, self.edit_text_overlay_table)
-        self.edit_text_overlay_table.setItemDelegateForColumn(1, self.edit_text_time_delegate)
-        self.edit_text_overlay_table.setItemDelegateForColumn(2, self.edit_text_time_delegate)
-        self.edit_text_overlay_table.setItemDelegateForColumn(3, self.edit_text_xy_delegate)
-        self.edit_text_overlay_table.setItemDelegateForColumn(4, self.edit_text_xy_delegate)
-        self.edit_text_overlay_table.setItemDelegateForColumn(5, self.edit_text_size_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(EDIT_TEXT_COL_START, self.edit_text_time_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(EDIT_TEXT_COL_END, self.edit_text_time_delegate)
+        self.edit_text_overlay_table.setItemDelegateForColumn(EDIT_TEXT_COL_SIZE, self.edit_text_size_delegate)
         self.edit_text_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
         self.edit_text_overlay_table.cellClicked.connect(self.on_edit_text_overlay_cell_clicked)
+        self.edit_text_overlay_table.installEventFilter(self)
         text_overlay_layout.addWidget(self.edit_text_overlay_table)
         text_button_layout = QHBoxLayout()
         text_button_layout.setContentsMargins(0, 0, 0, 0)
@@ -2164,7 +2168,7 @@ class MainWindow(QMainWindow):
         try:
             self._set_table_row_values(
                 self.edit_text_overlay_table,
-                ["ornek yazi", "0.0", "1.0", "0.05", "0.05", "36", "#FFFFFF"],
+                ["ornek yazi", "0.0", "1.0", "0.05, 0.05", "36", "#FFFFFF"],
             )
         finally:
             self.edit_text_overlay_table.blockSignals(False)
@@ -2180,8 +2184,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "edit_text_overlay_table"):
             return
         table = self.edit_text_overlay_table
-        if col != 6:
-            if col in (1, 2, 3, 4, 5) and table.isEnabled():
+        if col != EDIT_TEXT_COL_COLOR:
+            if col in (EDIT_TEXT_COL_START, EDIT_TEXT_COL_END, EDIT_TEXT_COL_SIZE) and table.isEnabled():
                 if table.state() == QAbstractItemView.State.EditingState:
                     return
                 item = table.item(row, col)
@@ -2199,7 +2203,7 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= table.rowCount():
             return
 
-        current_value = self._edit_table_cell_text(table, row, 6).upper()
+        current_value = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_COLOR).upper()
         initial_color = QColor(current_value) if self._is_valid_hex_color(current_value) else QColor("#FFFFFF")
         selected_color = QColorDialog.getColor(initial_color, self, "Yazi Rengi Sec")
         if not selected_color.isValid():
@@ -2208,16 +2212,102 @@ class MainWindow(QMainWindow):
         hex_value = selected_color.name(QColor.NameFormat.HexRgb).upper()
         table.blockSignals(True)
         try:
-            item = table.item(row, 6)
+            item = table.item(row, EDIT_TEXT_COL_COLOR)
             if item is None:
                 item = QTableWidgetItem(hex_value)
-                table.setItem(row, 6, item)
+                table.setItem(row, EDIT_TEXT_COL_COLOR, item)
             else:
                 item.setText(hex_value)
         finally:
             table.blockSignals(False)
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
+
+    @staticmethod
+    def _parse_text_overlay_position(raw_value: str) -> Optional[Tuple[float, float]]:
+        text = str(raw_value).strip()
+        if not text:
+            return None
+        normalized = text.replace(";", ",").replace("(", "").replace(")", "")
+        if "," in normalized:
+            parts = [part.strip() for part in normalized.split(",") if part.strip()]
+        else:
+            parts = [part for part in normalized.split() if part]
+        if len(parts) != 2:
+            return None
+        try:
+            return float(parts[0]), float(parts[1])
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_text_overlay_position(x_value: float, y_value: float) -> str:
+        safe_x = max(0.0, min(1.0, float(x_value)))
+        safe_y = max(0.0, min(1.0, float(y_value)))
+        x_text = f"{safe_x:.4f}".rstrip("0").rstrip(".")
+        y_text = f"{safe_y:.4f}".rstrip("0").rstrip(".")
+        if not x_text:
+            x_text = "0"
+        if not y_text:
+            y_text = "0"
+        return f"{x_text}, {y_text}"
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            hasattr(self, "edit_text_overlay_table")
+            and watched is self.edit_text_overlay_table
+            and isinstance(event, QKeyEvent)
+            and event.type() == QEvent.Type.KeyPress
+        ):
+            table = self.edit_text_overlay_table
+            if (
+                table.isEnabled()
+                and table.currentColumn() == EDIT_TEXT_COL_POSITION
+                and table.state() != QAbstractItemView.State.EditingState
+            ):
+                key_value = event.key()
+                if key_value in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
+                    row = table.currentRow()
+                    if row < 0:
+                        return True
+                    item = table.item(row, EDIT_TEXT_COL_POSITION)
+                    if item is None:
+                        item = QTableWidgetItem("0, 0")
+                        table.setItem(row, EDIT_TEXT_COL_POSITION, item)
+                    parsed = self._parse_text_overlay_position(item.text())
+                    current_x, current_y = (0.0, 0.0) if parsed is None else parsed
+
+                    step = 0.01
+                    modifiers = event.modifiers()
+                    if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                        step = 0.05
+                    elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                        step = 0.002
+
+                    if key_value == Qt.Key.Key_Left:
+                        current_x -= step
+                    elif key_value == Qt.Key.Key_Right:
+                        current_x += step
+                    elif key_value == Qt.Key.Key_Up:
+                        current_y -= step
+                    elif key_value == Qt.Key.Key_Down:
+                        current_y += step
+
+                    position_text = self._format_text_overlay_position(current_x, current_y)
+                    table.blockSignals(True)
+                    try:
+                        item.setText(position_text)
+                    finally:
+                        table.blockSignals(False)
+                    self._update_edit_controls()
+                    self._update_edit_overlay_preview(force_frame_reload=False)
+                    self.statusBar().showMessage(
+                        f"Yazi konumu guncellendi: {position_text} (Shift: hizli, Ctrl: hassas)",
+                        1200,
+                    )
+                    return True
+
+        return super().eventFilter(watched, event)
 
     def on_add_image_overlay_row_clicked(self) -> None:
         self.edit_image_overlay_table.blockSignals(True)
@@ -3009,15 +3099,14 @@ class MainWindow(QMainWindow):
 
         table = self.edit_text_overlay_table
         for row in range(table.rowCount()):
-            text_value = self._edit_table_cell_text(table, row, 0)
-            start_raw = self._edit_table_cell_text(table, row, 1)
-            end_raw = self._edit_table_cell_text(table, row, 2)
-            x_raw = self._edit_table_cell_text(table, row, 3)
-            y_raw = self._edit_table_cell_text(table, row, 4)
-            font_size_raw = self._edit_table_cell_text(table, row, 5)
-            color_raw = self._edit_table_cell_text(table, row, 6)
+            text_value = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_TEXT)
+            start_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_START)
+            end_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_END)
+            position_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_POSITION)
+            font_size_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_SIZE)
+            color_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_COLOR)
 
-            row_values = [text_value, start_raw, end_raw, x_raw, y_raw, font_size_raw, color_raw]
+            row_values = [text_value, start_raw, end_raw, position_raw, font_size_raw, color_raw]
             if not any(row_values):
                 continue
             if not text_value:
@@ -3025,11 +3114,15 @@ class MainWindow(QMainWindow):
             if not start_raw or not end_raw:
                 return [], f"Yazi katmani satir {row + 1}: Baslangic ve bitis zorunlu."
 
+            position_pair = self._parse_text_overlay_position(position_raw)
+            if position_pair is None:
+                return [], f"Yazi katmani satir {row + 1}: Pozisyon X,Y formatinda olmali."
+
             try:
                 start_seconds = float(start_raw)
                 end_seconds = float(end_raw)
-                x_value = float(x_raw)
-                y_value = float(y_raw)
+                x_value = float(position_pair[0])
+                y_value = float(position_pair[1])
                 font_size = int(font_size_raw)
             except (TypeError, ValueError):
                 return [], f"Yazi katmani satir {row + 1}: Sayisal alanlar gecersiz."
