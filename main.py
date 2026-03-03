@@ -2327,18 +2327,8 @@ class MainWindow(QMainWindow):
         if not source_name:
             source_name = "video"
 
-        if remove_audio or enable_speed or enable_audio_effect:
-            return os.path.join(source_dir, f"{source_name}_edited.mp4")
-
-        suffix = "_edited"
-        if enable_cut and enable_resize:
-            suffix = "_cut_resized"
-        elif enable_cut:
-            suffix = "_cut"
-        elif enable_resize:
-            suffix = "_resized"
-
-        return os.path.join(source_dir, f"{source_name}{suffix}.mp4")
+        timestamp_suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return os.path.join(source_dir, f"{source_name}_cut{timestamp_suffix}.mp4")
 
     @staticmethod
     def _suggest_non_conflicting_output_path(path: str) -> str:
