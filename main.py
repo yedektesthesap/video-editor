@@ -1921,8 +1921,14 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_add_button.clicked.connect(self.on_add_text_overlay_row_clicked)
         self.edit_text_overlay_remove_button = QPushButton("Satir Sil")
         self.edit_text_overlay_remove_button.clicked.connect(self.on_remove_text_overlay_row_clicked)
+        self.edit_text_overlay_save_button = QPushButton("Yazilari Kaydet")
+        self.edit_text_overlay_save_button.clicked.connect(self.on_save_text_overlay_rows_clicked)
+        self.edit_text_overlay_import_button = QPushButton("Yazilari Import Et")
+        self.edit_text_overlay_import_button.clicked.connect(self.on_import_text_overlay_rows_clicked)
         text_button_layout.addWidget(self.edit_text_overlay_add_button)
         text_button_layout.addWidget(self.edit_text_overlay_remove_button)
+        text_button_layout.addWidget(self.edit_text_overlay_save_button)
+        text_button_layout.addWidget(self.edit_text_overlay_import_button)
         text_button_layout.addStretch(1)
         text_overlay_layout.addLayout(text_button_layout)
         top_layout.addWidget(self.edit_text_overlay_group)
@@ -2179,6 +2185,186 @@ class MainWindow(QMainWindow):
         self._remove_selected_table_row(self.edit_text_overlay_table)
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
+
+    @staticmethod
+    def _format_overlay_number(value: float, decimals: int = 6) -> str:
+        text = f"{float(value):.{max(0, int(decimals))}f}".rstrip("0").rstrip(".")
+        return text or "0"
+
+    def on_save_text_overlay_rows_clicked(self) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        overlays, overlay_error = self._collect_text_overlays()
+        if overlay_error is not None:
+            QMessageBox.warning(self, "Yazi Katmanlari", overlay_error)
+            return
+        if not overlays:
+            QMessageBox.information(self, "Yazi Katmanlari", "Kaydedilecek gecerli yazi satiri yok.")
+            return
+
+        source_video = self.video_meta.source_video if self.video_meta is not None else ""
+        initial_dir = self._default_edit_output_directory(source_video) if source_video else os.getcwd()
+        if not os.path.isdir(initial_dir):
+            initial_dir = os.getcwd()
+
+        video_name = os.path.splitext(os.path.basename(source_video))[0].strip() if source_video else "video"
+        if not video_name:
+            video_name = "video"
+        initial_path = os.path.join(initial_dir, f"{video_name}_text_overlays.json")
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Yazi Katmanlarini Kaydet",
+            initial_path,
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".json"):
+            save_path += ".json"
+
+        serializable_items: list[dict] = []
+        for item in overlays:
+            payload_item = dict(item)
+            payload_item["position"] = self._format_text_overlay_position(
+                float(item.get("x", 0.0)),
+                float(item.get("y", 0.0)),
+            )
+            serializable_items.append(payload_item)
+
+        payload = {
+            "type": "text_overlays",
+            "version": "1.0",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "source_video": source_video,
+            "items": serializable_items,
+        }
+        try:
+            with open(save_path, "w", encoding="utf-8") as file:
+                json.dump(payload, file, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            QMessageBox.critical(self, "Yazi Katmanlari", f"Kayit basarisiz:\n{exc}")
+            return
+
+        self.statusBar().showMessage(f"Yazi katmanlari kaydedildi: {save_path}", 3500)
+        self._append_edit_log(f"Yazi katmanlari kaydedildi: {save_path}")
+
+    def on_import_text_overlay_rows_clicked(self) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        source_video = self.video_meta.source_video if self.video_meta is not None else ""
+        initial_dir = self._default_edit_output_directory(source_video) if source_video else os.getcwd()
+        if not os.path.isdir(initial_dir):
+            initial_dir = os.getcwd()
+
+        load_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Yazi Katmanlarini Import Et",
+            initial_dir,
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+        if not load_path:
+            return
+
+        try:
+            with open(load_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.warning(self, "Yazi Katmanlari", f"Dosya okunamadi:\n{exc}")
+            return
+
+        raw_items: object = payload
+        if isinstance(payload, dict):
+            if isinstance(payload.get("items"), list):
+                raw_items = payload.get("items")
+            elif isinstance(payload.get("text_overlays"), list):
+                raw_items = payload.get("text_overlays")
+            elif isinstance(payload.get("overlays"), list):
+                raw_items = payload.get("overlays")
+
+        if not isinstance(raw_items, list):
+            QMessageBox.warning(self, "Yazi Katmanlari", "Dosya formati gecersiz: yazi listesi bulunamadi.")
+            return
+
+        imported_rows: list[list[str]] = []
+        for index, raw_item in enumerate(raw_items, start=1):
+            if not isinstance(raw_item, dict):
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Veri dict formatinda olmali.")
+                return
+            text_value = str(raw_item.get("text", "")).strip()
+            if not text_value:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Metin bos olamaz.")
+                return
+            try:
+                start_seconds = float(raw_item.get("start", 0.0))
+                end_seconds = float(raw_item.get("end", 0.0))
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Baslangic/bitis degeri gecersiz.")
+                return
+            if start_seconds < 0.0:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Baslangic 0'dan kucuk olamaz.")
+                return
+            if end_seconds <= start_seconds:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Bitis baslangictan buyuk olmali.")
+                return
+
+            x_value: Optional[float] = None
+            y_value: Optional[float] = None
+            if "x" in raw_item and "y" in raw_item:
+                try:
+                    x_value = float(raw_item.get("x"))
+                    y_value = float(raw_item.get("y"))
+                except (TypeError, ValueError):
+                    x_value, y_value = None, None
+            if x_value is None or y_value is None:
+                parsed_position = self._parse_text_overlay_position(str(raw_item.get("position", "")))
+                if parsed_position is None:
+                    QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Pozisyon X,Y formatinda olmali.")
+                    return
+                x_value, y_value = parsed_position
+            if x_value < 0.0 or x_value > 1.0 or y_value < 0.0 or y_value > 1.0:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Pozisyon 0-1 araliginda olmali.")
+                return
+
+            try:
+                font_size = int(raw_item.get("font_size", 36))
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Boyut gecersiz.")
+                return
+            if font_size < 8 or font_size > 256:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Boyut 8-256 araliginda olmali.")
+                return
+
+            color_value = str(raw_item.get("color", "#FFFFFF")).strip().upper() or "#FFFFFF"
+            if not self._is_valid_hex_color(color_value):
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Renk #RRGGBB formatinda olmali.")
+                return
+
+            imported_rows.append(
+                [
+                    text_value,
+                    self._format_overlay_number(start_seconds, 3),
+                    self._format_overlay_number(end_seconds, 3),
+                    self._format_text_overlay_position(x_value, y_value),
+                    str(font_size),
+                    color_value,
+                ]
+            )
+
+        table = self.edit_text_overlay_table
+        table.blockSignals(True)
+        try:
+            table.setRowCount(0)
+            for row_values in imported_rows:
+                self._set_table_row_values(table, row_values)
+        finally:
+            table.blockSignals(False)
+
+        if imported_rows and hasattr(self, "edit_text_overlay_enabled_checkbox"):
+            self.edit_text_overlay_enabled_checkbox.setChecked(True)
+        self._update_edit_controls()
+        self._update_edit_overlay_preview(force_frame_reload=False)
+        self.statusBar().showMessage(f"Yazi katmanlari import edildi: {os.path.basename(load_path)}", 3500)
+        self._append_edit_log(f"Yazi katmanlari import edildi: {load_path}")
 
     def on_edit_text_overlay_cell_clicked(self, row: int, col: int) -> None:
         if not hasattr(self, "edit_text_overlay_table"):
@@ -3573,6 +3759,10 @@ class MainWindow(QMainWindow):
             self.edit_text_overlay_add_button.setEnabled((not is_running) and text_overlay_enabled)
         if hasattr(self, "edit_text_overlay_remove_button"):
             self.edit_text_overlay_remove_button.setEnabled((not is_running) and text_overlay_enabled)
+        if hasattr(self, "edit_text_overlay_save_button"):
+            self.edit_text_overlay_save_button.setEnabled(not is_running)
+        if hasattr(self, "edit_text_overlay_import_button"):
+            self.edit_text_overlay_import_button.setEnabled(not is_running)
         if hasattr(self, "edit_image_overlay_enabled_checkbox"):
             self.edit_image_overlay_enabled_checkbox.setEnabled(not is_running)
         if hasattr(self, "edit_image_overlay_table"):
