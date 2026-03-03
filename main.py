@@ -1800,6 +1800,87 @@ class MainWindow(QMainWindow):
         audio_layout.addWidget(self.edit_remove_audio_checkbox)
         top_layout.addWidget(self.edit_audio_group)
 
+        self.edit_text_overlay_group = QGroupBox("Yazi Katmanlari")
+        text_overlay_layout = QVBoxLayout(self.edit_text_overlay_group)
+        text_overlay_layout.setContentsMargins(8, 8, 8, 8)
+        text_overlay_layout.setSpacing(6)
+        self.edit_text_overlay_enabled_checkbox = QCheckBox("Enable Yazi Katmanlari")
+        self.edit_text_overlay_enabled_checkbox.setChecked(False)
+        self.edit_text_overlay_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+        text_overlay_layout.addWidget(self.edit_text_overlay_enabled_checkbox)
+        self.edit_text_overlay_table = QTableWidget(0, 7)
+        self._configure_edit_overlay_table(
+            self.edit_text_overlay_table,
+            ["Metin", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Boyut(px)", "Renk(#RRGGBB)"],
+        )
+        self.edit_text_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
+        text_overlay_layout.addWidget(self.edit_text_overlay_table)
+        text_button_layout = QHBoxLayout()
+        text_button_layout.setContentsMargins(0, 0, 0, 0)
+        self.edit_text_overlay_add_button = QPushButton("Satir Ekle")
+        self.edit_text_overlay_add_button.clicked.connect(self.on_add_text_overlay_row_clicked)
+        self.edit_text_overlay_remove_button = QPushButton("Satir Sil")
+        self.edit_text_overlay_remove_button.clicked.connect(self.on_remove_text_overlay_row_clicked)
+        text_button_layout.addWidget(self.edit_text_overlay_add_button)
+        text_button_layout.addWidget(self.edit_text_overlay_remove_button)
+        text_button_layout.addStretch(1)
+        text_overlay_layout.addLayout(text_button_layout)
+        top_layout.addWidget(self.edit_text_overlay_group)
+
+        self.edit_image_overlay_group = QGroupBox("PNG Katmanlari")
+        image_overlay_layout = QVBoxLayout(self.edit_image_overlay_group)
+        image_overlay_layout.setContentsMargins(8, 8, 8, 8)
+        image_overlay_layout.setSpacing(6)
+        self.edit_image_overlay_enabled_checkbox = QCheckBox("Enable PNG Katmanlari")
+        self.edit_image_overlay_enabled_checkbox.setChecked(False)
+        self.edit_image_overlay_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+        image_overlay_layout.addWidget(self.edit_image_overlay_enabled_checkbox)
+        self.edit_image_overlay_table = QTableWidget(0, 7)
+        self._configure_edit_overlay_table(
+            self.edit_image_overlay_table,
+            ["Dosya", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Genislik(px)", "Yukseklik(px)"],
+        )
+        self.edit_image_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
+        image_overlay_layout.addWidget(self.edit_image_overlay_table)
+        image_button_layout = QHBoxLayout()
+        image_button_layout.setContentsMargins(0, 0, 0, 0)
+        self.edit_image_overlay_add_button = QPushButton("Satir Ekle")
+        self.edit_image_overlay_add_button.clicked.connect(self.on_add_image_overlay_row_clicked)
+        self.edit_image_overlay_remove_button = QPushButton("Satir Sil")
+        self.edit_image_overlay_remove_button.clicked.connect(self.on_remove_image_overlay_row_clicked)
+        image_button_layout.addWidget(self.edit_image_overlay_add_button)
+        image_button_layout.addWidget(self.edit_image_overlay_remove_button)
+        image_button_layout.addStretch(1)
+        image_overlay_layout.addLayout(image_button_layout)
+        top_layout.addWidget(self.edit_image_overlay_group)
+
+        self.edit_external_audio_group = QGroupBox("Harici Ses Katmanlari")
+        external_audio_layout = QVBoxLayout(self.edit_external_audio_group)
+        external_audio_layout.setContentsMargins(8, 8, 8, 8)
+        external_audio_layout.setSpacing(6)
+        self.edit_external_audio_enabled_checkbox = QCheckBox("Enable Harici Ses")
+        self.edit_external_audio_enabled_checkbox.setChecked(False)
+        self.edit_external_audio_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
+        external_audio_layout.addWidget(self.edit_external_audio_enabled_checkbox)
+        self.edit_external_audio_table = QTableWidget(0, 4)
+        self._configure_edit_overlay_table(
+            self.edit_external_audio_table,
+            ["Dosya", "Baslangic(sn)", "Bitis(sn, ops)", "Ses Seviyesi"],
+        )
+        self.edit_external_audio_table.itemChanged.connect(self._on_edit_overlay_table_changed)
+        external_audio_layout.addWidget(self.edit_external_audio_table)
+        external_audio_button_layout = QHBoxLayout()
+        external_audio_button_layout.setContentsMargins(0, 0, 0, 0)
+        self.edit_external_audio_add_button = QPushButton("Satir Ekle")
+        self.edit_external_audio_add_button.clicked.connect(self.on_add_external_audio_row_clicked)
+        self.edit_external_audio_remove_button = QPushButton("Satir Sil")
+        self.edit_external_audio_remove_button.clicked.connect(self.on_remove_external_audio_row_clicked)
+        external_audio_button_layout.addWidget(self.edit_external_audio_add_button)
+        external_audio_button_layout.addWidget(self.edit_external_audio_remove_button)
+        external_audio_button_layout.addStretch(1)
+        external_audio_layout.addLayout(external_audio_button_layout)
+        top_layout.addWidget(self.edit_external_audio_group)
+
         self.edit_speed_group = QGroupBox("Video Hizi")
         speed_layout = QVBoxLayout(self.edit_speed_group)
         speed_layout.setContentsMargins(8, 8, 8, 8)
@@ -1859,6 +1940,9 @@ class MainWindow(QMainWindow):
             self.edit_cut_enabled_checkbox,
             self.edit_resize_enabled_checkbox,
             self.edit_remove_audio_checkbox,
+            self.edit_text_overlay_enabled_checkbox,
+            self.edit_image_overlay_enabled_checkbox,
+            self.edit_external_audio_enabled_checkbox,
             self.edit_speed_enabled_checkbox,
             self.edit_audio_effect_enabled_checkbox,
         ):
@@ -1910,6 +1994,85 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(bottom_content, stretch=1)
         self._refresh_edit_resolution_options()
         self._update_edit_quality_tooltips()
+        self._update_edit_controls()
+
+    def _configure_edit_overlay_table(self, table: QTableWidget, headers: list[str]) -> None:
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.verticalHeader().setVisible(False)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.SelectedClicked
+        )
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table.setMinimumHeight(150)
+
+    def _on_edit_overlay_table_changed(self, *_args: object) -> None:
+        self._update_edit_controls()
+
+    @staticmethod
+    def _set_table_row_values(table: QTableWidget, row_values: list[str]) -> None:
+        row_index = table.rowCount()
+        table.insertRow(row_index)
+        for col_index, raw_value in enumerate(row_values):
+            table.setItem(row_index, col_index, QTableWidgetItem(str(raw_value)))
+
+    @staticmethod
+    def _remove_selected_table_row(table: QTableWidget) -> None:
+        current_row = table.currentRow()
+        if current_row < 0 and table.rowCount() > 0:
+            current_row = table.rowCount() - 1
+        if current_row >= 0:
+            table.removeRow(current_row)
+
+    def on_add_text_overlay_row_clicked(self) -> None:
+        self.edit_text_overlay_table.blockSignals(True)
+        try:
+            self._set_table_row_values(
+                self.edit_text_overlay_table,
+                ["ornek yazi", "0.0", "1.0", "0.05", "0.05", "36", "#FFFFFF"],
+            )
+        finally:
+            self.edit_text_overlay_table.blockSignals(False)
+        self._update_edit_controls()
+
+    def on_remove_text_overlay_row_clicked(self) -> None:
+        self._remove_selected_table_row(self.edit_text_overlay_table)
+        self._update_edit_controls()
+
+    def on_add_image_overlay_row_clicked(self) -> None:
+        self.edit_image_overlay_table.blockSignals(True)
+        try:
+            self._set_table_row_values(
+                self.edit_image_overlay_table,
+                ["", "0.0", "1.0", "0.10", "0.10", "", ""],
+            )
+        finally:
+            self.edit_image_overlay_table.blockSignals(False)
+        self._update_edit_controls()
+
+    def on_remove_image_overlay_row_clicked(self) -> None:
+        self._remove_selected_table_row(self.edit_image_overlay_table)
+        self._update_edit_controls()
+
+    def on_add_external_audio_row_clicked(self) -> None:
+        self.edit_external_audio_table.blockSignals(True)
+        try:
+            self._set_table_row_values(
+                self.edit_external_audio_table,
+                ["", "0.0", "", "1.0"],
+            )
+        finally:
+            self.edit_external_audio_table.blockSignals(False)
+        self._update_edit_controls()
+
+    def on_remove_external_audio_row_clicked(self) -> None:
+        self._remove_selected_table_row(self.edit_external_audio_table)
         self._update_edit_controls()
 
     def _setup_shortcuts(self) -> None:
@@ -2442,6 +2605,216 @@ class MainWindow(QMainWindow):
     def _is_edit_audio_effect_enabled(self) -> bool:
         return hasattr(self, "edit_audio_effect_enabled_checkbox") and self.edit_audio_effect_enabled_checkbox.isChecked()
 
+    def _is_edit_text_overlay_enabled(self) -> bool:
+        return hasattr(self, "edit_text_overlay_enabled_checkbox") and self.edit_text_overlay_enabled_checkbox.isChecked()
+
+    def _is_edit_image_overlay_enabled(self) -> bool:
+        return hasattr(self, "edit_image_overlay_enabled_checkbox") and self.edit_image_overlay_enabled_checkbox.isChecked()
+
+    def _is_edit_external_audio_enabled(self) -> bool:
+        return hasattr(self, "edit_external_audio_enabled_checkbox") and self.edit_external_audio_enabled_checkbox.isChecked()
+
+    @staticmethod
+    def _edit_table_cell_text(table: QTableWidget, row: int, col: int) -> str:
+        item = table.item(row, col)
+        if item is None:
+            return ""
+        return item.text().strip()
+
+    @staticmethod
+    def _is_valid_hex_color(value: str) -> bool:
+        text = value.strip()
+        if len(text) != 7 or not text.startswith("#"):
+            return False
+        try:
+            int(text[1:], 16)
+        except ValueError:
+            return False
+        return True
+
+    def _collect_text_overlays(self) -> Tuple[list[dict], Optional[str]]:
+        overlays: list[dict] = []
+        if not hasattr(self, "edit_text_overlay_table"):
+            return overlays, None
+
+        table = self.edit_text_overlay_table
+        for row in range(table.rowCount()):
+            text_value = self._edit_table_cell_text(table, row, 0)
+            start_raw = self._edit_table_cell_text(table, row, 1)
+            end_raw = self._edit_table_cell_text(table, row, 2)
+            x_raw = self._edit_table_cell_text(table, row, 3)
+            y_raw = self._edit_table_cell_text(table, row, 4)
+            font_size_raw = self._edit_table_cell_text(table, row, 5)
+            color_raw = self._edit_table_cell_text(table, row, 6)
+
+            row_values = [text_value, start_raw, end_raw, x_raw, y_raw, font_size_raw, color_raw]
+            if not any(row_values):
+                continue
+            if not text_value:
+                return [], f"Yazi katmani satir {row + 1}: Metin bos olamaz."
+            if not start_raw or not end_raw:
+                return [], f"Yazi katmani satir {row + 1}: Baslangic ve bitis zorunlu."
+
+            try:
+                start_seconds = float(start_raw)
+                end_seconds = float(end_raw)
+                x_value = float(x_raw)
+                y_value = float(y_raw)
+                font_size = int(font_size_raw)
+            except (TypeError, ValueError):
+                return [], f"Yazi katmani satir {row + 1}: Sayisal alanlar gecersiz."
+
+            if start_seconds < 0.0:
+                return [], f"Yazi katmani satir {row + 1}: Baslangic 0'dan kucuk olamaz."
+            if end_seconds <= start_seconds:
+                return [], f"Yazi katmani satir {row + 1}: Bitis baslangictan buyuk olmali."
+            if x_value < 0.0 or x_value > 1.0 or y_value < 0.0 or y_value > 1.0:
+                return [], f"Yazi katmani satir {row + 1}: X ve Y 0-1 araliginda olmali."
+            if font_size < 8 or font_size > 256:
+                return [], f"Yazi katmani satir {row + 1}: Boyut 8-256 araliginda olmali."
+
+            color_value = color_raw.upper() if color_raw else "#FFFFFF"
+            if not self._is_valid_hex_color(color_value):
+                return [], f"Yazi katmani satir {row + 1}: Renk #RRGGBB formatinda olmali."
+
+            overlays.append(
+                {
+                    "text": text_value,
+                    "start": round(start_seconds, 6),
+                    "end": round(end_seconds, 6),
+                    "x": round(x_value, 6),
+                    "y": round(y_value, 6),
+                    "font_size": int(font_size),
+                    "color": color_value,
+                }
+            )
+        return overlays, None
+
+    def _collect_image_overlays(self) -> Tuple[list[dict], Optional[str]]:
+        overlays: list[dict] = []
+        if not hasattr(self, "edit_image_overlay_table"):
+            return overlays, None
+
+        table = self.edit_image_overlay_table
+        for row in range(table.rowCount()):
+            path_value = self._edit_table_cell_text(table, row, 0)
+            start_raw = self._edit_table_cell_text(table, row, 1)
+            end_raw = self._edit_table_cell_text(table, row, 2)
+            x_raw = self._edit_table_cell_text(table, row, 3)
+            y_raw = self._edit_table_cell_text(table, row, 4)
+            width_raw = self._edit_table_cell_text(table, row, 5)
+            height_raw = self._edit_table_cell_text(table, row, 6)
+
+            row_values = [path_value, start_raw, end_raw, x_raw, y_raw, width_raw, height_raw]
+            if not any(row_values):
+                continue
+            if not path_value:
+                return [], f"PNG katmani satir {row + 1}: Dosya yolu bos olamaz."
+            if not os.path.isfile(path_value):
+                return [], f"PNG katmani satir {row + 1}: Dosya bulunamadi ({path_value})."
+            if not start_raw or not end_raw:
+                return [], f"PNG katmani satir {row + 1}: Baslangic ve bitis zorunlu."
+
+            try:
+                start_seconds = float(start_raw)
+                end_seconds = float(end_raw)
+                x_value = float(x_raw)
+                y_value = float(y_raw)
+            except (TypeError, ValueError):
+                return [], f"PNG katmani satir {row + 1}: Sayisal alanlar gecersiz."
+
+            if start_seconds < 0.0:
+                return [], f"PNG katmani satir {row + 1}: Baslangic 0'dan kucuk olamaz."
+            if end_seconds <= start_seconds:
+                return [], f"PNG katmani satir {row + 1}: Bitis baslangictan buyuk olmali."
+            if x_value < 0.0 or x_value > 1.0 or y_value < 0.0 or y_value > 1.0:
+                return [], f"PNG katmani satir {row + 1}: X ve Y 0-1 araliginda olmali."
+
+            width_value: Optional[int] = None
+            height_value: Optional[int] = None
+            if width_raw or height_raw:
+                if (not width_raw) or (not height_raw):
+                    return [], f"PNG katmani satir {row + 1}: Genislik ve yukseklik birlikte girilmeli."
+                try:
+                    width_value = int(width_raw)
+                    height_value = int(height_raw)
+                except (TypeError, ValueError):
+                    return [], f"PNG katmani satir {row + 1}: Genislik/yukseklik tam sayi olmali."
+                if width_value <= 0 or height_value <= 0:
+                    return [], f"PNG katmani satir {row + 1}: Genislik/yukseklik pozitif olmali."
+
+            overlays.append(
+                {
+                    "path": path_value,
+                    "start": round(start_seconds, 6),
+                    "end": round(end_seconds, 6),
+                    "x": round(x_value, 6),
+                    "y": round(y_value, 6),
+                    "width": width_value,
+                    "height": height_value,
+                }
+            )
+
+        return overlays, None
+
+    def _collect_external_audio_tracks(self) -> Tuple[list[dict], Optional[str]]:
+        tracks: list[dict] = []
+        if not hasattr(self, "edit_external_audio_table"):
+            return tracks, None
+
+        table = self.edit_external_audio_table
+        for row in range(table.rowCount()):
+            path_value = self._edit_table_cell_text(table, row, 0)
+            start_raw = self._edit_table_cell_text(table, row, 1)
+            end_raw = self._edit_table_cell_text(table, row, 2)
+            volume_raw = self._edit_table_cell_text(table, row, 3)
+
+            row_values = [path_value, start_raw, end_raw, volume_raw]
+            if not any(row_values):
+                continue
+            if not path_value:
+                return [], f"Harici ses satir {row + 1}: Dosya yolu bos olamaz."
+            if not os.path.isfile(path_value):
+                return [], f"Harici ses satir {row + 1}: Dosya bulunamadi ({path_value})."
+            if not start_raw:
+                return [], f"Harici ses satir {row + 1}: Baslangic zorunlu."
+
+            try:
+                start_seconds = float(start_raw)
+            except (TypeError, ValueError):
+                return [], f"Harici ses satir {row + 1}: Baslangic gecersiz."
+            if start_seconds < 0.0:
+                return [], f"Harici ses satir {row + 1}: Baslangic 0'dan kucuk olamaz."
+
+            end_seconds: Optional[float] = None
+            if end_raw:
+                try:
+                    end_seconds = float(end_raw)
+                except (TypeError, ValueError):
+                    return [], f"Harici ses satir {row + 1}: Bitis gecersiz."
+                if end_seconds <= start_seconds:
+                    return [], f"Harici ses satir {row + 1}: Bitis baslangictan buyuk olmali."
+
+            volume_value = 1.0
+            if volume_raw:
+                try:
+                    volume_value = float(volume_raw)
+                except (TypeError, ValueError):
+                    return [], f"Harici ses satir {row + 1}: Ses seviyesi gecersiz."
+            if volume_value < 0.0 or volume_value > 4.0:
+                return [], f"Harici ses satir {row + 1}: Ses seviyesi 0.0-4.0 araliginda olmali."
+
+            tracks.append(
+                {
+                    "path": path_value,
+                    "start": round(start_seconds, 6),
+                    "end": round(end_seconds, 6) if end_seconds is not None else None,
+                    "volume": round(volume_value, 6),
+                }
+            )
+
+        return tracks, None
+
     def _refresh_edit_resolution_options(self) -> None:
         if not hasattr(self, "edit_target_resolution_combo"):
             return
@@ -2646,6 +3019,9 @@ class MainWindow(QMainWindow):
         remove_audio_enabled = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
         audio_effect_enabled = self._is_edit_audio_effect_enabled()
+        text_overlay_enabled = self._is_edit_text_overlay_enabled()
+        image_overlay_enabled = self._is_edit_image_overlay_enabled()
+        external_audio_enabled = self._is_edit_external_audio_enabled()
 
         has_segments = bool(self.edit_segments)
         cut_ready = True
@@ -2663,14 +3039,37 @@ class MainWindow(QMainWindow):
         effect_preset = self._selected_audio_effect_preset()
         effect_ready = (not audio_effect_enabled) or (effect_preset is not None)
         effective_effect_preset = self._effective_audio_effect_preset()
+        text_overlays, text_overlay_error = self._collect_text_overlays()
+        image_overlays, image_overlay_error = self._collect_image_overlays()
+        external_audio_tracks, external_audio_error = self._collect_external_audio_tracks()
+        text_overlay_ready = (not text_overlay_enabled) or (text_overlay_error is None and bool(text_overlays))
+        image_overlay_ready = (not image_overlay_enabled) or (image_overlay_error is None and bool(image_overlays))
+        external_audio_ready = (not external_audio_enabled) or (
+            external_audio_error is None and bool(external_audio_tracks)
+        )
+        visual_overlay_effective = (
+            (text_overlay_enabled and bool(text_overlays)) or (image_overlay_enabled and bool(image_overlays))
+        )
+        external_audio_effective = external_audio_enabled and bool(external_audio_tracks)
 
-        has_selected_operation = cut_enabled or resize_enabled or remove_audio_enabled or speed_enabled or audio_effect_enabled
+        has_selected_operation = (
+            cut_enabled
+            or resize_enabled
+            or remove_audio_enabled
+            or speed_enabled
+            or audio_effect_enabled
+            or text_overlay_enabled
+            or image_overlay_enabled
+            or external_audio_enabled
+        )
         has_effective_operation = (
             (cut_enabled and has_segments)
             or (resize_enabled and (target_resolution is not None or target_fps is not None))
             or remove_audio_enabled
             or (effective_speed_factor is not None)
             or (effective_effect_preset is not None)
+            or visual_overlay_effective
+            or external_audio_effective
         )
 
         analysis_running = self._is_event_detection_running() or self._is_color_analysis_running()
@@ -2683,6 +3082,9 @@ class MainWindow(QMainWindow):
             and resize_ready
             and speed_ready
             and effect_ready
+            and text_overlay_ready
+            and image_overlay_ready
+            and external_audio_ready
             and (not is_running)
             and (not analysis_running)
         )
@@ -2700,6 +3102,30 @@ class MainWindow(QMainWindow):
             self.edit_target_fps_combo.setEnabled((not is_running) and resize_enabled)
         if hasattr(self, "edit_remove_audio_checkbox"):
             self.edit_remove_audio_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_text_overlay_enabled_checkbox"):
+            self.edit_text_overlay_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_text_overlay_table"):
+            self.edit_text_overlay_table.setEnabled((not is_running) and text_overlay_enabled)
+        if hasattr(self, "edit_text_overlay_add_button"):
+            self.edit_text_overlay_add_button.setEnabled((not is_running) and text_overlay_enabled)
+        if hasattr(self, "edit_text_overlay_remove_button"):
+            self.edit_text_overlay_remove_button.setEnabled((not is_running) and text_overlay_enabled)
+        if hasattr(self, "edit_image_overlay_enabled_checkbox"):
+            self.edit_image_overlay_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_image_overlay_table"):
+            self.edit_image_overlay_table.setEnabled((not is_running) and image_overlay_enabled)
+        if hasattr(self, "edit_image_overlay_add_button"):
+            self.edit_image_overlay_add_button.setEnabled((not is_running) and image_overlay_enabled)
+        if hasattr(self, "edit_image_overlay_remove_button"):
+            self.edit_image_overlay_remove_button.setEnabled((not is_running) and image_overlay_enabled)
+        if hasattr(self, "edit_external_audio_enabled_checkbox"):
+            self.edit_external_audio_enabled_checkbox.setEnabled(not is_running)
+        if hasattr(self, "edit_external_audio_table"):
+            self.edit_external_audio_table.setEnabled((not is_running) and external_audio_enabled)
+        if hasattr(self, "edit_external_audio_add_button"):
+            self.edit_external_audio_add_button.setEnabled((not is_running) and external_audio_enabled)
+        if hasattr(self, "edit_external_audio_remove_button"):
+            self.edit_external_audio_remove_button.setEnabled((not is_running) and external_audio_enabled)
         if hasattr(self, "edit_speed_enabled_checkbox"):
             self.edit_speed_enabled_checkbox.setEnabled(not is_running)
         if hasattr(self, "edit_speed_combo"):
@@ -2771,10 +3197,52 @@ class MainWindow(QMainWindow):
         remove_audio = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
         audio_effect_enabled = self._is_edit_audio_effect_enabled()
+        text_overlay_enabled = self._is_edit_text_overlay_enabled()
+        image_overlay_enabled = self._is_edit_image_overlay_enabled()
+        external_audio_enabled = self._is_edit_external_audio_enabled()
 
-        if not (cut_enabled or resize_enabled or remove_audio or speed_enabled or audio_effect_enabled):
+        if not (
+            cut_enabled
+            or resize_enabled
+            or remove_audio
+            or speed_enabled
+            or audio_effect_enabled
+            or text_overlay_enabled
+            or image_overlay_enabled
+            or external_audio_enabled
+        ):
             QMessageBox.warning(self, "Edit", "En az bir islem icin enable secilmelidir.")
             return
+
+        text_overlays: list[dict] = []
+        if text_overlay_enabled:
+            text_overlays, text_error = self._collect_text_overlays()
+            if text_error is not None:
+                QMessageBox.warning(self, "Edit", text_error)
+                return
+            if not text_overlays:
+                QMessageBox.warning(self, "Edit", "Yazi katmani aktifken en az bir gecerli satir olmalidir.")
+                return
+
+        image_overlays: list[dict] = []
+        if image_overlay_enabled:
+            image_overlays, image_error = self._collect_image_overlays()
+            if image_error is not None:
+                QMessageBox.warning(self, "Edit", image_error)
+                return
+            if not image_overlays:
+                QMessageBox.warning(self, "Edit", "PNG katmani aktifken en az bir gecerli satir olmalidir.")
+                return
+
+        external_audio_tracks: list[dict] = []
+        if external_audio_enabled:
+            external_audio_tracks, external_audio_error = self._collect_external_audio_tracks()
+            if external_audio_error is not None:
+                QMessageBox.warning(self, "Edit", external_audio_error)
+                return
+            if not external_audio_tracks:
+                QMessageBox.warning(self, "Edit", "Harici ses aktifken en az bir gecerli satir olmalidir.")
+                return
 
         segments: list[tuple[float, float]] = []
         if cut_enabled:
@@ -2808,7 +3276,17 @@ class MainWindow(QMainWindow):
         resize_effective = resize_enabled and (target_resolution is not None or target_fps is not None)
         speed_effective = speed_factor is not None
         effect_effective = audio_effect_preset is not None
-        has_effective_operation = cut_effective or resize_effective or remove_audio or speed_effective or effect_effective
+        visual_overlay_effective = bool(text_overlays or image_overlays)
+        external_audio_effective = bool(external_audio_tracks)
+        has_effective_operation = (
+            visual_overlay_effective
+            or remove_audio
+            or external_audio_effective
+            or cut_effective
+            or resize_effective
+            or speed_effective
+            or effect_effective
+        )
         if not has_effective_operation:
             QMessageBox.warning(self, "Edit", "Secilen ayarlarda uygulanacak bir islem bulunamadi.")
             return
@@ -2857,6 +3335,21 @@ class MainWindow(QMainWindow):
         self._video_edit_started_monotonic = time.monotonic()
         self._sync_edit_progress_time_fields(0)
         self.edit_log.clear()
+        self._append_edit_log("Zaman Ekseni: Edit Oncesi (kaynak video).")
+
+        if text_overlay_enabled:
+            self._append_edit_log(f"Yazi katmani: {len(text_overlays)} satir uygulanacak.")
+        else:
+            self._append_edit_log("Yazi katmani devre disi.")
+        if image_overlay_enabled:
+            self._append_edit_log(f"PNG katmani: {len(image_overlays)} satir uygulanacak.")
+        else:
+            self._append_edit_log("PNG katmani devre disi.")
+        if external_audio_enabled:
+            self._append_edit_log(f"Harici ses katmani: {len(external_audio_tracks)} satir uygulanacak (mix).")
+        else:
+            self._append_edit_log("Harici ses katmani devre disi.")
+
         if cut_enabled:
             self._append_edit_log(self._format_segments_summary(self.edit_segments))
             self._append_edit_log("Cut modu: Re-encode (frame hassas).")
@@ -2900,12 +3393,16 @@ class MainWindow(QMainWindow):
             self._append_edit_log("Ses efekti adimi devre disi.")
 
         planned_steps: list[str] = []
+        if visual_overlay_effective:
+            planned_steps.append("Yazi/PNG")
+        if remove_audio:
+            planned_steps.append("Ses Silme")
+        if external_audio_effective:
+            planned_steps.append("Harici Ses")
         if cut_effective:
             planned_steps.append("Cut")
         if resize_effective:
             planned_steps.append("Cozunurluk/FPS")
-        if remove_audio:
-            planned_steps.append("Ses Silme")
         if speed_effective:
             planned_steps.append("Video Hizi")
         if effect_effective:
@@ -2934,6 +3431,10 @@ class MainWindow(QMainWindow):
             speed_factor=speed_factor,
             enable_audio_effect=effect_effective,
             audio_effect_preset=audio_effect_preset,
+            text_overlays=text_overlays,
+            image_overlays=image_overlays,
+            external_audio_tracks=external_audio_tracks,
+            external_audio_mode="mix",
         )
         self.edit_worker.moveToThread(self.edit_thread)
 
