@@ -1744,14 +1744,14 @@ class MainWindow(QMainWindow):
         quality_layout.addWidget(self.edit_preset_label)
         self.edit_preset_combo = QComboBox()
         self.edit_preset_combo.addItems(["ultrafast", "fast", "medium", "slow"])
-        self.edit_preset_combo.setCurrentText("slow")
+        self.edit_preset_combo.setCurrentText("medium")
         self.edit_preset_combo.currentIndexChanged.connect(self._update_edit_quality_tooltips)
         quality_layout.addWidget(self.edit_preset_combo)
         self.edit_crf_label = QLabel("CRF:")
         quality_layout.addWidget(self.edit_crf_label)
         self.edit_crf_spin = QSpinBox()
         self.edit_crf_spin.setRange(0, 51)
-        self.edit_crf_spin.setValue(0)
+        self.edit_crf_spin.setValue(25)
         self.edit_crf_spin.valueChanged.connect(self._update_edit_quality_tooltips)
         quality_layout.addWidget(self.edit_crf_spin)
         quality_layout.addStretch(1)
@@ -2338,12 +2338,12 @@ class MainWindow(QMainWindow):
         return "CRF 41-51: cok dusuk kalite, en kucuk dosya."
 
     def _build_edit_quality_tooltip(self) -> str:
-        preset = "slow"
+        preset = "medium"
         if hasattr(self, "edit_preset_combo"):
             selected_preset = self.edit_preset_combo.currentText().strip().lower()
             if selected_preset:
                 preset = selected_preset
-        crf_value = int(self.edit_crf_spin.value()) if hasattr(self, "edit_crf_spin") else 0
+        crf_value = int(self.edit_crf_spin.value()) if hasattr(self, "edit_crf_spin") else 25
 
         preset_effect = self._describe_preset_effect(preset)
         crf_effect = self._describe_crf_effect(crf_value)
@@ -2817,7 +2817,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "FFmpeg", "FFmpeg yolu bulunamadi. Islem baslatilmadi.")
             return
 
-        preset = self.edit_preset_combo.currentText().strip() or "slow"
+        preset = self.edit_preset_combo.currentText().strip() or "medium"
         crf_value = int(self.edit_crf_spin.value())
 
         self.edit_progress.setValue(0)
