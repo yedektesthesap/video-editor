@@ -1964,6 +1964,7 @@ class MainWindow(QMainWindow):
             ["Dosya", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Genislik(px)", "Yukseklik(px)"],
         )
         self.edit_image_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
+        self.edit_image_overlay_table.cellClicked.connect(self.on_edit_image_overlay_cell_clicked)
         image_overlay_layout.addWidget(self.edit_image_overlay_table)
         image_button_layout = QHBoxLayout()
         image_button_layout.setContentsMargins(0, 0, 0, 0)
@@ -2610,6 +2611,54 @@ class MainWindow(QMainWindow):
 
     def on_remove_image_overlay_row_clicked(self) -> None:
         self._remove_selected_table_row(self.edit_image_overlay_table)
+        self._update_edit_controls()
+        self._update_edit_overlay_preview(force_frame_reload=False)
+
+    def on_edit_image_overlay_cell_clicked(self, row: int, col: int) -> None:
+        if not hasattr(self, "edit_image_overlay_table"):
+            return
+        if col != 0:
+            return
+
+        table = self.edit_image_overlay_table
+        if row < 0 or row >= table.rowCount() or not table.isEnabled():
+            return
+
+        current_value = self._edit_table_cell_text(table, row, 0)
+        initial_dir = ""
+        if current_value:
+            if os.path.isfile(current_value):
+                initial_dir = os.path.dirname(current_value)
+            elif os.path.isdir(current_value):
+                initial_dir = current_value
+        if not initial_dir and self.video_meta is not None and self.video_meta.source_video:
+            video_dir = os.path.dirname(self.video_meta.source_video)
+            if os.path.isdir(video_dir):
+                initial_dir = video_dir
+        if not initial_dir:
+            initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = os.getcwd()
+
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "PNG Dosyasi Sec",
+            initial_dir,
+            "PNG Files (*.png);;Image Files (*.png *.jpg *.jpeg *.bmp *.webp);;All Files (*.*)",
+        )
+        if not selected_path:
+            return
+
+        table.blockSignals(True)
+        try:
+            item = table.item(row, 0)
+            if item is None:
+                item = QTableWidgetItem(selected_path)
+                table.setItem(row, 0, item)
+            else:
+                item.setText(selected_path)
+        finally:
+            table.blockSignals(False)
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
 
