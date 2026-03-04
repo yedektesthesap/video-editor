@@ -592,7 +592,7 @@ class VideoEditWorker(QObject):
             out_label = f"[vimg{image_index}]"
             filter_parts.append(
                 f"{current_video}{prepared_label}"
-                f"overlay=x=main_w*{x_value:.6f}:y=main_h*{y_value:.6f}:"
+                f"overlay=x=main_w*{x_value:.6f}:y=main_h*{y_value:.6f}:shortest=1:"
                 f"enable='between(t,{start_seconds:.6f},{end_seconds:.6f})'{out_label}"
             )
             current_video = out_label
