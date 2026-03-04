@@ -82,6 +82,10 @@ EDIT_IMAGE_COL_START = 1
 EDIT_IMAGE_COL_END = 2
 EDIT_IMAGE_COL_POSITION = 3
 EDIT_IMAGE_COL_SIZE = 4
+EDIT_EXTERNAL_AUDIO_COL_FILE = 0
+EDIT_EXTERNAL_AUDIO_COL_START = 1
+EDIT_EXTERNAL_AUDIO_COL_END = 2
+EDIT_EXTERNAL_AUDIO_COL_VOLUME = 3
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
@@ -2007,7 +2011,18 @@ class MainWindow(QMainWindow):
             self.edit_external_audio_table,
             ["Dosya", "Baslangic(sn)", "Bitis(sn, ops)", "Ses Seviyesi"],
         )
+        external_audio_table_header = self.edit_external_audio_table.horizontalHeader()
+        external_audio_table_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        external_audio_table_header.setStretchLastSection(False)
+        self.edit_external_audio_table.setColumnWidth(EDIT_EXTERNAL_AUDIO_COL_FILE, 260)
+        self.edit_external_audio_table.setColumnWidth(EDIT_EXTERNAL_AUDIO_COL_START, 120)
+        self.edit_external_audio_table.setColumnWidth(EDIT_EXTERNAL_AUDIO_COL_END, 140)
+        self.edit_external_audio_table.setColumnWidth(EDIT_EXTERNAL_AUDIO_COL_VOLUME, 120)
+        self.edit_external_audio_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.edit_external_audio_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.edit_external_audio_table.setWordWrap(False)
         self.edit_external_audio_table.itemChanged.connect(self._on_edit_overlay_table_changed)
+        self.edit_external_audio_table.cellClicked.connect(self.on_edit_external_audio_cell_clicked)
         external_audio_layout.addWidget(self.edit_external_audio_table)
         external_audio_button_layout = QHBoxLayout()
         external_audio_button_layout.setContentsMargins(0, 0, 0, 0)
@@ -2861,6 +2876,67 @@ class MainWindow(QMainWindow):
 
     def on_remove_external_audio_row_clicked(self) -> None:
         self._remove_selected_table_row(self.edit_external_audio_table)
+        self._update_edit_controls()
+
+    def on_edit_external_audio_cell_clicked(self, row: int, col: int) -> None:
+        if not hasattr(self, "edit_external_audio_table"):
+            return
+
+        table = self.edit_external_audio_table
+        if row < 0 or row >= table.rowCount() or not table.isEnabled():
+            return
+
+        if col != EDIT_EXTERNAL_AUDIO_COL_FILE:
+            if col in (EDIT_EXTERNAL_AUDIO_COL_START, EDIT_EXTERNAL_AUDIO_COL_END, EDIT_EXTERNAL_AUDIO_COL_VOLUME):
+                if table.state() == QAbstractItemView.State.EditingState:
+                    return
+                item = table.item(row, col)
+                if item is None:
+                    default_value = ""
+                    if col == EDIT_EXTERNAL_AUDIO_COL_START:
+                        default_value = "0.0"
+                    elif col == EDIT_EXTERNAL_AUDIO_COL_VOLUME:
+                        default_value = "1.0"
+                    item = QTableWidgetItem(default_value)
+                    table.setItem(row, col, item)
+                table.editItem(item)
+            return
+
+        current_value = self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_FILE)
+        initial_dir = ""
+        if current_value:
+            if os.path.isfile(current_value):
+                initial_dir = os.path.dirname(current_value)
+            elif os.path.isdir(current_value):
+                initial_dir = current_value
+        if not initial_dir and self.video_meta is not None and self.video_meta.source_video:
+            video_dir = os.path.dirname(self.video_meta.source_video)
+            if os.path.isdir(video_dir):
+                initial_dir = video_dir
+        if not initial_dir:
+            initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = os.getcwd()
+
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Ses Dosyasi Sec",
+            initial_dir,
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma *.aiff *.aif);;All Files (*.*)",
+        )
+        if not selected_path:
+            return
+
+        table.blockSignals(True)
+        try:
+            item = table.item(row, EDIT_EXTERNAL_AUDIO_COL_FILE)
+            if item is None:
+                item = QTableWidgetItem(selected_path)
+                table.setItem(row, EDIT_EXTERNAL_AUDIO_COL_FILE, item)
+            else:
+                item.setText(selected_path)
+        finally:
+            table.blockSignals(False)
         self._update_edit_controls()
 
     def _clear_edit_overlay_preview_cache(self) -> None:
@@ -3781,10 +3857,10 @@ class MainWindow(QMainWindow):
 
         table = self.edit_external_audio_table
         for row in range(table.rowCount()):
-            path_value = self._edit_table_cell_text(table, row, 0)
-            start_raw = self._edit_table_cell_text(table, row, 1)
-            end_raw = self._edit_table_cell_text(table, row, 2)
-            volume_raw = self._edit_table_cell_text(table, row, 3)
+            path_value = self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_FILE)
+            start_raw = self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_START)
+            end_raw = self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_END)
+            volume_raw = self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_VOLUME)
 
             row_values = [path_value, start_raw, end_raw, volume_raw]
             if not any(row_values):
