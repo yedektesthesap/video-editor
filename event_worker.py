@@ -289,6 +289,8 @@ class VideoEditWorker(QObject):
             for index, operation_name in enumerate(operation_names):
                 is_last_step = index == (step_count - 1)
                 step_output = output_path if is_last_step else self._create_temp_output_path(temp_files)
+                fallback_command: Optional[list[str]] = None
+                cut_attempted_with_audio = False
 
                 if operation_name == "visual_overlay":
                     command = self._build_visual_overlay_command(
@@ -320,11 +322,18 @@ class VideoEditWorker(QObject):
                     step_label = "Harici Ses Mix"
                     step_duration = estimated_duration
                 elif operation_name == "cut":
+                    cut_attempted_with_audio = True
                     command = self._build_cut_command(
                         ffmpeg_binary=ffmpeg_binary,
                         input_path=input_path,
                         output_path=step_output,
-                        has_audio=has_audio,
+                        has_audio=True,
+                    )
+                    fallback_command = self._build_cut_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        input_path=input_path,
+                        output_path=step_output,
+                        has_audio=False,
                     )
                     step_label = "Cut"
                     step_duration = cut_duration
@@ -361,17 +370,43 @@ class VideoEditWorker(QObject):
                     step_label = "Ses Efekti"
                     step_duration = estimated_duration
 
-                self._run_ffmpeg_step(
-                    command=command,
-                    step_index=index,
-                    step_count=step_count,
-                    step_label=step_label,
-                    expected_duration=step_duration,
-                )
+                cut_used_audio_fallback = False
+                try:
+                    self._run_ffmpeg_step(
+                        command=command,
+                        step_index=index,
+                        step_count=step_count,
+                        step_label=step_label,
+                        expected_duration=step_duration,
+                    )
+                except RuntimeError as exc:
+                    fallback_allowed = False
+                    if fallback_command is not None:
+                        fallback_allowed = self._is_missing_audio_stream_error(exc)
+                        if not fallback_allowed:
+                            fallback_allowed = not self._detect_audio_stream(ffmpeg_binary, input_path)
+                    if not fallback_allowed or fallback_command is None:
+                        raise
+                    self.progress.emit(
+                        max(0, min(100, int(round((float(index) / float(max(1, step_count))) * 100.0)))),
+                        f"{index + 1}/{step_count} Cut: kaynakta ses akisi bulunamadi, sessiz cut uygulanacak.",
+                    )
+                    self._run_ffmpeg_step(
+                        command=fallback_command,
+                        step_index=index,
+                        step_count=step_count,
+                        step_label=step_label,
+                        expected_duration=step_duration,
+                    )
+                    cut_used_audio_fallback = True
                 completed_ops.append(operation_name)
 
                 input_path = step_output
-                has_audio = self._detect_audio_stream(ffmpeg_binary, input_path)
+                detected_has_audio = self._detect_audio_stream(ffmpeg_binary, input_path)
+                if operation_name == "cut" and cut_attempted_with_audio and (not cut_used_audio_fallback) and (not detected_has_audio):
+                    has_audio = True
+                else:
+                    has_audio = detected_has_audio
                 if operation_name == "cut":
                     estimated_duration = cut_duration
                 elif operation_name == "speed" and self.speed_factor is not None and estimated_duration is not None:
@@ -1071,11 +1106,11 @@ class VideoEditWorker(QObject):
                 "-v",
                 "error",
                 "-select_streams",
-                "a:0",
+                "a",
                 "-show_entries",
-                "stream=index",
+                "stream=codec_type",
                 "-of",
-                "csv=p=0",
+                "default=noprint_wrappers=1:nokey=1",
                 input_path,
             ]
             try:
@@ -1090,8 +1125,12 @@ class VideoEditWorker(QObject):
                     timeout=8,
                     **subprocess_kwargs,
                 )
-                if completed.returncode == 0 and completed.stdout.strip():
-                    return True
+                if completed.returncode == 0:
+                    stream_lines = [line.strip().lower() for line in (completed.stdout or "").splitlines() if line.strip()]
+                    if any(line == "audio" for line in stream_lines):
+                        return True
+                    if stream_lines:
+                        return False
             except (OSError, subprocess.SubprocessError):
                 pass
 
@@ -1112,6 +1151,15 @@ class VideoEditWorker(QObject):
             return False
         output_text = (completed.stdout or "") + "\n" + (completed.stderr or "")
         return "Audio:" in output_text
+
+    @staticmethod
+    def _is_missing_audio_stream_error(exc: RuntimeError) -> bool:
+        text = str(exc).lower()
+        if "matches no streams" in text and ("stream specifier" in text or "0:a" in text):
+            return True
+        if "cannot find a matching stream for unlabeled input pad" in text and "atrim" in text:
+            return True
+        return False
 
     @staticmethod
     def _resolve_ffprobe_binary(ffmpeg_binary: str) -> Optional[str]:
