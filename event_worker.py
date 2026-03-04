@@ -504,7 +504,7 @@ class VideoEditWorker(QObject):
         ]
         if has_audio:
             command.extend(["-map", "0:a?", "-c:a", "alac"])
-        command.extend(["-movflags", "+faststart", output_path])
+        command.extend(["-shortest", "-movflags", "+faststart", output_path])
         return command
 
     def _build_remove_audio_command(
