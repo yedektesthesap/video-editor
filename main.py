@@ -69,6 +69,7 @@ SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 SETTINGS_FFMPEG_PATH = "ffmpeg_path"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
+EVENT_COL_CONFIDENCE = 6
 EVENT_COL_TARGET_ROI = 2
 EVENT_COL_TYPE = 3
 EDIT_TEXT_COL_TEXT = 0
@@ -91,6 +92,57 @@ EDIT_EXTERNAL_AUDIO_COL_VOLUME = 3
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
+MANUAL_EVENT_NAMES: list[str] = [
+    "sol1_al1",
+    "sol1_koy1",
+    "sol2_al1",
+    "sol2_koy1",
+    "sol2_al2",
+    "sol2_koy2",
+    "sol3_al1",
+    "sol3_koy1",
+    "sol3_al2",
+    "sol3_koy2",
+    "sol3_al3",
+    "sol3_koy3",
+    "sol4_al1",
+    "sol4_koy1",
+    "sol4_al2",
+    "sol4_koy2",
+    "sol4_al3",
+    "sol4_koy3",
+    "sol4_al4",
+    "sol4_koy4",
+    "sag1_al1",
+    "sag1_koy1",
+    "sag2_al1",
+    "sag2_koy1",
+    "sag2_al2",
+    "sag2_koy2",
+    "sag3_al1",
+    "sag3_koy1",
+    "sag3_al2",
+    "sag3_koy2",
+    "sag3_al3",
+    "sag3_koy3",
+    "sag4_al1",
+    "sag4_koy1",
+    "sag4_al2",
+    "sag4_koy2",
+    "sag4_al3",
+    "sag4_koy3",
+    "sag4_al4",
+    "sag4_koy4",
+]
+MANUAL_EVENT_DEFINITIONS: list[dict[str, object]] = [
+    {
+        "id": idx + 1,
+        "name": name,
+        "target_roi": "",
+        "type": "manual",
+    }
+    for idx, name in enumerate(MANUAL_EVENT_NAMES)
+]
 EDIT_RESOLUTION_PRESETS: list[tuple[str, tuple[int, int]]] = [
     ("2160p (3840x2160)", (3840, 2160)),
     ("1440p (2560x1440)", (2560, 1440)),
@@ -3168,6 +3220,11 @@ class MainWindow(QMainWindow):
         else:
             self.switch_to_roi_tab()
 
+    def _event_definitions_for_current_mode(self) -> list[dict]:
+        if self.detection_mode == DETECTION_MODE_MANUAL:
+            return MANUAL_EVENT_DEFINITIONS
+        return EVENT_DEFINITIONS
+
     def _build_manual_events_payload(self) -> list[dict]:
         return [
             {
@@ -3179,7 +3236,7 @@ class MainWindow(QMainWindow):
                 "end": None,
                 "confidence": None,
             }
-            for event_info in EVENT_DEFINITIONS
+            for event_info in MANUAL_EVENT_DEFINITIONS
         ]
 
     def _selected_mode_from_combo(self) -> Optional[str]:
@@ -3484,11 +3541,12 @@ class MainWindow(QMainWindow):
         self._update_edit_overlay_preview(force_frame_reload=False)
 
     def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
-        if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
+        event_definitions = self._event_definitions_for_current_mode()
+        if len(self.last_detected_events) < len(event_definitions):
             return None, "Kesim icin tum event satirlarinda start/end degeri dolu olmalidir."
 
         raw_segments: list[tuple[float, float]] = []
-        for row, event_info in enumerate(EVENT_DEFINITIONS):
+        for row, event_info in enumerate(event_definitions):
             event_payload = self.last_detected_events[row] if row < len(self.last_detected_events) else {}
             event_id = int(event_payload.get("id", event_info["id"]))
             raw_start = event_payload.get("start")
@@ -4567,15 +4625,16 @@ class MainWindow(QMainWindow):
         self.event_table.setItem(row, col, item)
 
     def _reset_event_table(self) -> None:
-        self.event_table.setRowCount(len(EVENT_DEFINITIONS))
-        for row, event_info in enumerate(EVENT_DEFINITIONS):
+        event_definitions = self._event_definitions_for_current_mode()
+        self.event_table.setRowCount(len(event_definitions))
+        for row, event_info in enumerate(event_definitions):
             self._set_table_item(row, 0, str(event_info["id"]))
             self._set_table_item(row, 1, str(event_info["name"]))
             self._set_table_item(row, 2, str(event_info["target_roi"]))
             self._set_table_item(row, 3, str(event_info["type"]))
             self._set_time_table_item(row, EVENT_COL_START, None)
             self._set_time_table_item(row, EVENT_COL_END, None)
-            self._set_table_item(row, 6, "0.00")
+            self._set_table_item(row, EVENT_COL_CONFIDENCE, "0.00")
         self._update_event_table_frame_height()
 
     def _populate_event_table_from_results(self) -> None:
@@ -4609,23 +4668,32 @@ class MainWindow(QMainWindow):
             self._set_table_item(row, 3, str(event.get("type", "")))
             self._set_time_table_item(row, EVENT_COL_START, start_seconds)
             self._set_time_table_item(row, EVENT_COL_END, end_seconds)
-            self._set_table_item(row, 6, confidence_text)
+            self._set_table_item(row, EVENT_COL_CONFIDENCE, confidence_text)
         self._update_analysis_controls()
 
     def _has_complete_event_times(self) -> bool:
-        if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
+        event_definitions = self._event_definitions_for_current_mode()
+        if len(self.last_detected_events) < len(event_definitions):
             return False
 
-        for row, _event_info in enumerate(EVENT_DEFINITIONS):
+        is_manual = self.detection_mode == DETECTION_MODE_MANUAL
+        for row, _event_info in enumerate(event_definitions):
             if row >= len(self.last_detected_events):
                 return False
             event_payload = self.last_detected_events[row]
             raw_start = event_payload.get("start")
-            raw_end = event_payload.get("end")
-            if raw_start is None or raw_end is None:
+            if raw_start is None:
                 return False
             try:
                 float(raw_start)
+            except (TypeError, ValueError):
+                return False
+            if is_manual:
+                continue
+            raw_end = event_payload.get("end")
+            if raw_end is None:
+                return False
+            try:
                 float(raw_end)
             except (TypeError, ValueError):
                 return False
@@ -4689,6 +4757,8 @@ class MainWindow(QMainWindow):
 
         self.event_table.setColumnHidden(EVENT_COL_TARGET_ROI, is_manual)
         self.event_table.setColumnHidden(EVENT_COL_TYPE, is_manual)
+        self.event_table.setColumnHidden(EVENT_COL_END, is_manual)
+        self.event_table.setColumnHidden(EVENT_COL_CONFIDENCE, is_manual)
 
         self._sync_event_mode_combo_to_state()
         self.event_mode_combo.setEnabled(self.startup_completed and mode_ready and not any_running)
@@ -5119,7 +5189,11 @@ class MainWindow(QMainWindow):
         self._update_analysis_controls()
 
     def on_event_table_cell_clicked(self, row: int, col: int) -> None:
-        if col not in (EVENT_COL_START, EVENT_COL_END):
+        allowed_cols = (EVENT_COL_START,) if self.detection_mode == DETECTION_MODE_MANUAL else (
+            EVENT_COL_START,
+            EVENT_COL_END,
+        )
+        if col not in allowed_cols:
             return
         if row < 0 or row >= len(self.last_detected_events):
             return
@@ -5233,26 +5307,21 @@ class MainWindow(QMainWindow):
         self._update_analysis_controls()
 
     def _validate_manual_events_for_save(self) -> Optional[str]:
-        if len(self.last_detected_events) < len(EVENT_DEFINITIONS):
+        if len(self.last_detected_events) < len(MANUAL_EVENT_DEFINITIONS):
             return "Manuel kayit icin tum event satirlari olusmamis."
 
-        for row, event_info in enumerate(EVENT_DEFINITIONS):
+        for row, event_info in enumerate(MANUAL_EVENT_DEFINITIONS):
             event_payload = self.last_detected_events[row] if row < len(self.last_detected_events) else {}
             event_id = int(event_payload.get("id", event_info["id"]))
             raw_start = event_payload.get("start")
-            raw_end = event_payload.get("end")
 
-            if raw_start is None or raw_end is None:
-                return f"Event {event_id} icin start/end bos birakilamaz."
+            if raw_start is None:
+                return f"Event {event_id} icin start bos birakilamaz."
 
             try:
-                start_seconds = float(raw_start)
-                end_seconds = float(raw_end)
+                float(raw_start)
             except (TypeError, ValueError):
-                return f"Event {event_id} zaman bilgisi gecersiz."
-
-            if end_seconds < start_seconds:
-                return f"Event {event_id} icin start zamani end zamanindan buyuk olamaz."
+                return f"Event {event_id} start degeri gecersiz."
 
         return None
 
@@ -5275,8 +5344,9 @@ class MainWindow(QMainWindow):
                 continue
             events_by_id[event_id] = raw_event
 
+        event_definitions = self._event_definitions_for_current_mode()
         normalized_events: list[dict] = []
-        for row, event_info in enumerate(EVENT_DEFINITIONS):
+        for row, event_info in enumerate(event_definitions):
             event_id = int(event_info["id"])
             source_event = events_by_id.get(event_id)
             if source_event is None and row < len(raw_events) and isinstance(raw_events[row], dict):
