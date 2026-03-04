@@ -11,6 +11,9 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from event_detector import EventDetectionCancelled, analyze_roi_color_timeline, detect_events
 
+OUTPUT_AUDIO_CODEC = "aac"
+OUTPUT_AUDIO_BITRATE = "192k"
+
 
 class EventDetectionWorker(QObject):
     progress = pyqtSignal(int, str)
@@ -493,7 +496,9 @@ class VideoEditWorker(QObject):
             str(self.crf),
         ]
         if has_audio:
-            command.extend(["-map", "[aout]", "-c:a", "alac"])
+            command.extend(
+                ["-map", "[aout]", "-c:a", OUTPUT_AUDIO_CODEC, "-b:a", OUTPUT_AUDIO_BITRATE]
+            )
         command.extend(["-movflags", "+faststart", output_path])
         return command
 
@@ -538,7 +543,9 @@ class VideoEditWorker(QObject):
             str(self.crf),
         ]
         if has_audio:
-            command.extend(["-map", "0:a?", "-c:a", "alac"])
+            command.extend(
+                ["-map", "0:a?", "-c:a", OUTPUT_AUDIO_CODEC, "-b:a", OUTPUT_AUDIO_BITRATE]
+            )
         command.extend(["-shortest", "-movflags", "+faststart", output_path])
         return command
 
@@ -678,7 +685,9 @@ class VideoEditWorker(QObject):
             ]
         )
         if has_audio:
-            command.extend(["-map", "0:a?", "-c:a", "alac"])
+            command.extend(
+                ["-map", "0:a?", "-c:a", OUTPUT_AUDIO_CODEC, "-b:a", OUTPUT_AUDIO_BITRATE]
+            )
         command.extend(["-movflags", "+faststart", output_path])
         return command
 
@@ -752,7 +761,9 @@ class VideoEditWorker(QObject):
                 "-c:v",
                 "copy",
                 "-c:a",
-                "alac",
+                OUTPUT_AUDIO_CODEC,
+                "-b:a",
+                OUTPUT_AUDIO_BITRATE,
                 "-shortest",
                 "-movflags",
                 "+faststart",
@@ -803,7 +814,9 @@ class VideoEditWorker(QObject):
                     "-map",
                     "0:a:0",
                     "-c:a",
-                    "alac",
+                    OUTPUT_AUDIO_CODEC,
+                    "-b:a",
+                    OUTPUT_AUDIO_BITRATE,
                 ]
             )
         command.extend(["-movflags", "+faststart", output_path])
@@ -849,7 +862,9 @@ class VideoEditWorker(QObject):
                 "-c:v",
                 "copy",
                 "-c:a",
-                "alac",
+                OUTPUT_AUDIO_CODEC,
+                "-b:a",
+                OUTPUT_AUDIO_BITRATE,
                 "-movflags",
                 "+faststart",
                 output_path,
@@ -873,7 +888,9 @@ class VideoEditWorker(QObject):
             "-c:v",
             "copy",
             "-c:a",
-            "alac",
+            OUTPUT_AUDIO_CODEC,
+            "-b:a",
+            OUTPUT_AUDIO_BITRATE,
             "-shortest",
             "-movflags",
             "+faststart",
