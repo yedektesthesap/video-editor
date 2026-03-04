@@ -595,10 +595,19 @@ class VideoEditWorker(QObject):
             y_value = float(text_item.get("y", 0.0))
             font_size = int(text_item.get("font_size", 24))
             color = str(text_item.get("color", "FFFFFF")).strip().lstrip("#") or "FFFFFF"
+            bold_enabled = bool(text_item.get("bold", False))
+            italic_enabled = bool(text_item.get("italic", False))
+            fontfile_option = ""
+            if bold_enabled or italic_enabled:
+                style_fontfile = self._resolve_drawtext_fontfile(bold_enabled=bold_enabled, italic_enabled=italic_enabled)
+                if style_fontfile:
+                    escaped_fontfile = self._escape_drawtext_text(style_fontfile)
+                    fontfile_option = f"fontfile='{escaped_fontfile}':"
             out_label = f"[vtxt{text_index}]"
             filter_parts.append(
                 f"{current_video}drawtext=text='{text_value}':"
                 f"expansion=none:"
+                f"{fontfile_option}"
                 f"x=(w-text_w)*{x_value:.6f}:y=(h-text_h)*{y_value:.6f}:"
                 f"fontsize={font_size}:fontcolor={color}:"
                 f"enable='between(t,{start_seconds:.6f},{end_seconds:.6f})'{out_label}"
@@ -836,6 +845,32 @@ class VideoEditWorker(QObject):
         if key == "phone":
             return "highpass=f=300,lowpass=f=3200,acompressor=threshold=-19dB:ratio=3:attack=5:release=50"
         return ""
+
+    @staticmethod
+    def _resolve_drawtext_fontfile(bold_enabled: bool, italic_enabled: bool) -> Optional[str]:
+        style_key = (bool(bold_enabled), bool(italic_enabled))
+        candidates_by_style: dict[tuple[bool, bool], tuple[str, ...]] = {
+            (False, True): (
+                r"C:\Windows\Fonts\ariali.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans-Oblique.ttf",
+            ),
+            (True, False): (
+                r"C:\Windows\Fonts\arialbd.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+            ),
+            (True, True): (
+                r"C:\Windows\Fonts\arialbi.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans-BoldOblique.ttf",
+            ),
+        }
+        for candidate in candidates_by_style.get(style_key, ()):
+            expanded = os.path.expandvars(os.path.expanduser(candidate))
+            if os.path.isfile(expanded):
+                return expanded
+        return None
 
     @staticmethod
     def _escape_drawtext_text(raw_text: str) -> str:
