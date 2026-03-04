@@ -101,12 +101,6 @@ EDIT_SPEED_PRESETS: list[tuple[str, float]] = [
     ("1.5x", 1.5),
     ("2.0x", 2.0),
 ]
-EDIT_AUDIO_EFFECT_PRESETS: list[tuple[str, str]] = [
-    ("Yok", "none"),
-    ("Bass boost", "bass_boost"),
-    ("Echo", "echo"),
-    ("Telefonik", "phone"),
-]
 
 SOURCE_START_SENSITIVITY_PRESETS: dict[str, dict[str, float]] = {
     "Hassas": {
@@ -2050,14 +2044,6 @@ class MainWindow(QMainWindow):
         speed_layout.addLayout(speed_target_layout)
         top_layout.addWidget(self.edit_speed_group)
 
-        self.edit_audio_effect_group = QGroupBox("Ses Efektleri")
-        effect_layout = QVBoxLayout(self.edit_audio_effect_group)
-        effect_layout.setContentsMargins(8, 8, 8, 8)
-        effect_layout.setSpacing(6)
-        self.edit_audio_effect_enabled_checkbox = QCheckBox("Enable Ses Efekti")
-        self.edit_audio_effect_enabled_checkbox.setChecked(False)
-        self.edit_audio_effect_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
-
         edit_checkbox_style = """
         QCheckBox {
             spacing: 8px;
@@ -2090,24 +2076,8 @@ class MainWindow(QMainWindow):
             self.edit_image_overlay_enabled_checkbox,
             self.edit_external_audio_enabled_checkbox,
             self.edit_speed_enabled_checkbox,
-            self.edit_audio_effect_enabled_checkbox,
         ):
             checkbox.setStyleSheet(edit_checkbox_style)
-
-        effect_target_layout = QHBoxLayout()
-        effect_target_layout.setContentsMargins(0, 0, 0, 0)
-        effect_target_layout.addWidget(QLabel("Efekt:"))
-        self.edit_audio_effect_combo = QComboBox()
-        for label, effect_key in EDIT_AUDIO_EFFECT_PRESETS:
-            self.edit_audio_effect_combo.addItem(label, effect_key)
-        self.edit_audio_effect_combo.setCurrentIndex(0)
-        self.edit_audio_effect_combo.currentIndexChanged.connect(self._update_edit_controls)
-        effect_target_layout.addWidget(self.edit_audio_effect_combo)
-        effect_target_layout.addStretch(1)
-
-        effect_layout.addWidget(self.edit_audio_effect_enabled_checkbox)
-        effect_layout.addLayout(effect_target_layout)
-        top_layout.addWidget(self.edit_audio_effect_group)
         top_layout.addStretch(1)
 
         bottom_content = QWidget(left_panel)
@@ -3643,9 +3613,6 @@ class MainWindow(QMainWindow):
     def _is_edit_speed_enabled(self) -> bool:
         return hasattr(self, "edit_speed_enabled_checkbox") and self.edit_speed_enabled_checkbox.isChecked()
 
-    def _is_edit_audio_effect_enabled(self) -> bool:
-        return hasattr(self, "edit_audio_effect_enabled_checkbox") and self.edit_audio_effect_enabled_checkbox.isChecked()
-
     def _is_edit_text_overlay_enabled(self) -> bool:
         return hasattr(self, "edit_text_overlay_enabled_checkbox") and self.edit_text_overlay_enabled_checkbox.isChecked()
 
@@ -3991,27 +3958,6 @@ class MainWindow(QMainWindow):
             return None
         return value
 
-    def _selected_audio_effect_preset(self) -> Optional[str]:
-        if not hasattr(self, "edit_audio_effect_combo"):
-            return None
-        raw_data = self.edit_audio_effect_combo.currentData()
-        if raw_data is None:
-            return None
-        value = str(raw_data).strip()
-        if not value:
-            return None
-        return value
-
-    def _effective_audio_effect_preset(self) -> Optional[str]:
-        if not self._is_edit_audio_effect_enabled():
-            return None
-        value = self._selected_audio_effect_preset()
-        if value is None:
-            return None
-        if value == "none":
-            return None
-        return value
-
     def _update_edit_segments_label(self) -> None:
         if not hasattr(self, "edit_segments_label"):
             return
@@ -4068,7 +4014,6 @@ class MainWindow(QMainWindow):
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio_enabled = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
-        audio_effect_enabled = self._is_edit_audio_effect_enabled()
         text_overlay_enabled = self._is_edit_text_overlay_enabled()
         image_overlay_enabled = self._is_edit_image_overlay_enabled()
         external_audio_enabled = self._is_edit_external_audio_enabled()
@@ -4086,9 +4031,6 @@ class MainWindow(QMainWindow):
         speed_factor = self._selected_speed_factor()
         speed_ready = (not speed_enabled) or (speed_factor is not None)
         effective_speed_factor = self._effective_speed_factor()
-        effect_preset = self._selected_audio_effect_preset()
-        effect_ready = (not audio_effect_enabled) or (effect_preset is not None)
-        effective_effect_preset = self._effective_audio_effect_preset()
         text_overlays, text_overlay_error = self._collect_text_overlays()
         image_overlays, image_overlay_error = self._collect_image_overlays()
         external_audio_tracks, external_audio_error = self._collect_external_audio_tracks()
@@ -4107,7 +4049,6 @@ class MainWindow(QMainWindow):
             or resize_enabled
             or remove_audio_enabled
             or speed_enabled
-            or audio_effect_enabled
             or text_overlay_enabled
             or image_overlay_enabled
             or external_audio_enabled
@@ -4117,7 +4058,6 @@ class MainWindow(QMainWindow):
             or (resize_enabled and (target_resolution is not None or target_fps is not None))
             or remove_audio_enabled
             or (effective_speed_factor is not None)
-            or (effective_effect_preset is not None)
             or visual_overlay_effective
             or external_audio_effective
         )
@@ -4131,7 +4071,6 @@ class MainWindow(QMainWindow):
             and cut_ready
             and resize_ready
             and speed_ready
-            and effect_ready
             and text_overlay_ready
             and image_overlay_ready
             and external_audio_ready
@@ -4184,10 +4123,6 @@ class MainWindow(QMainWindow):
             self.edit_speed_enabled_checkbox.setEnabled(not is_running)
         if hasattr(self, "edit_speed_combo"):
             self.edit_speed_combo.setEnabled((not is_running) and speed_enabled)
-        if hasattr(self, "edit_audio_effect_enabled_checkbox"):
-            self.edit_audio_effect_enabled_checkbox.setEnabled(not is_running)
-        if hasattr(self, "edit_audio_effect_combo"):
-            self.edit_audio_effect_combo.setEnabled((not is_running) and audio_effect_enabled)
         if is_running:
             if self._video_edit_cancel_requested:
                 self.edit_run_button.setText("Edit Islemi Durduruluyor...")
@@ -4250,7 +4185,6 @@ class MainWindow(QMainWindow):
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio = self._is_edit_remove_audio_enabled()
         speed_enabled = self._is_edit_speed_enabled()
-        audio_effect_enabled = self._is_edit_audio_effect_enabled()
         text_overlay_enabled = self._is_edit_text_overlay_enabled()
         image_overlay_enabled = self._is_edit_image_overlay_enabled()
         external_audio_enabled = self._is_edit_external_audio_enabled()
@@ -4260,7 +4194,6 @@ class MainWindow(QMainWindow):
             or resize_enabled
             or remove_audio
             or speed_enabled
-            or audio_effect_enabled
             or text_overlay_enabled
             or image_overlay_enabled
             or external_audio_enabled
@@ -4321,15 +4254,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Edit", "Video hizi icin 1.0x disinda bir deger secilmelidir.")
             return
 
-        audio_effect_preset = self._effective_audio_effect_preset()
-        if audio_effect_enabled and audio_effect_preset is None:
-            QMessageBox.warning(self, "Edit", "Ses efekti icin 'Yok' disinda bir secim yapilmalidir.")
-            return
-
         cut_effective = cut_enabled and bool(self.edit_segments)
         resize_effective = resize_enabled and (target_resolution is not None or target_fps is not None)
         speed_effective = speed_factor is not None
-        effect_effective = audio_effect_preset is not None
         visual_overlay_effective = bool(text_overlays or image_overlays)
         external_audio_effective = bool(external_audio_tracks)
         has_effective_operation = (
@@ -4339,7 +4266,6 @@ class MainWindow(QMainWindow):
             or cut_effective
             or resize_effective
             or speed_effective
-            or effect_effective
         )
         if not has_effective_operation:
             QMessageBox.warning(self, "Edit", "Secilen ayarlarda uygulanacak bir islem bulunamadi.")
@@ -4432,20 +4358,6 @@ class MainWindow(QMainWindow):
         else:
             self._append_edit_log("Video hizi adimi devre disi.")
 
-        if audio_effect_enabled and audio_effect_preset is not None:
-            effect_display_name = audio_effect_preset
-            if hasattr(self, "edit_audio_effect_combo"):
-                combo_text = self.edit_audio_effect_combo.currentText().strip()
-                if combo_text:
-                    effect_display_name = combo_text
-            self._append_edit_log(f"Ses efekti: {effect_display_name}")
-            if remove_audio:
-                self._append_edit_log("Efekt modu: Bagimsiz efekt sesi uretilecek.")
-            else:
-                self._append_edit_log("Efekt modu: Orijinal ses + efekt sesi mix.")
-        else:
-            self._append_edit_log("Ses efekti adimi devre disi.")
-
         planned_steps: list[str] = []
         if visual_overlay_effective:
             planned_steps.append("Yazi/PNG")
@@ -4459,8 +4371,6 @@ class MainWindow(QMainWindow):
             planned_steps.append("Cozunurluk/FPS")
         if speed_effective:
             planned_steps.append("Video Hizi")
-        if effect_effective:
-            planned_steps.append("Ses Efekti")
         self._append_edit_log(f"Planlanan adimlar: {' -> '.join(planned_steps)}")
         self._append_edit_log(f"FFmpeg: {ffmpeg_path}")
         self._append_edit_log(f"Cikti: {output_path}")
@@ -4483,8 +4393,6 @@ class MainWindow(QMainWindow):
             remove_audio=remove_audio,
             enable_speed=speed_effective,
             speed_factor=speed_factor,
-            enable_audio_effect=effect_effective,
-            audio_effect_preset=audio_effect_preset,
             text_overlays=text_overlays,
             image_overlays=image_overlays,
             external_audio_tracks=external_audio_tracks,
