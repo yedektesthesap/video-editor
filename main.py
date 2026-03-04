@@ -69,6 +69,8 @@ SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 SETTINGS_FFMPEG_PATH = "ffmpeg_path"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
+EVENT_COL_TARGET_ROI = 2
+EVENT_COL_TYPE = 3
 EDIT_TEXT_COL_TEXT = 0
 EDIT_TEXT_COL_START = 1
 EDIT_TEXT_COL_END = 2
@@ -4684,6 +4686,9 @@ class MainWindow(QMainWindow):
         is_auto = self.detection_mode == DETECTION_MODE_AUTO
         is_manual = self.detection_mode == DETECTION_MODE_MANUAL
         mode_ready = is_auto or is_manual
+
+        self.event_table.setColumnHidden(EVENT_COL_TARGET_ROI, is_manual)
+        self.event_table.setColumnHidden(EVENT_COL_TYPE, is_manual)
 
         self._sync_event_mode_combo_to_state()
         self.event_mode_combo.setEnabled(self.startup_completed and mode_ready and not any_running)
