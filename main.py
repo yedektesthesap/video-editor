@@ -1757,15 +1757,12 @@ class MainWindow(QMainWindow):
         step_layout.addStretch(1)
 
         assign_layout = QHBoxLayout()
-        self.manual_assign_hint_label = QLabel("Satir secin, sonra Set Start / Set End ile atayin.")
+        self.manual_assign_hint_label = QLabel("Satir secin, sonra Set Start ile atayin.")
         self.manual_assign_hint_label.setStyleSheet("color: #9aa4b7;")
         assign_layout.addWidget(self.manual_assign_hint_label, stretch=1)
         self.manual_set_start_button = QPushButton("Set Start")
-        self.manual_set_end_button = QPushButton("Set End")
         self.manual_set_start_button.clicked.connect(self.on_manual_set_start_clicked)
-        self.manual_set_end_button.clicked.connect(self.on_manual_set_end_clicked)
         assign_layout.addWidget(self.manual_set_start_button)
-        assign_layout.addWidget(self.manual_set_end_button)
 
         manual_layout.addLayout(nav_layout)
         manual_layout.addWidget(self.manual_frame_slider)
@@ -3436,9 +3433,6 @@ class MainWindow(QMainWindow):
     def on_manual_set_start_clicked(self) -> None:
         self._assign_manual_event_time("start")
 
-    def on_manual_set_end_clicked(self) -> None:
-        self._assign_manual_event_time("end")
-
     def _assign_manual_event_time(self, field_name: str, row_override: Optional[int] = None) -> None:
         if self.detection_mode != DETECTION_MODE_MANUAL:
             return
@@ -4844,7 +4838,6 @@ class MainWindow(QMainWindow):
         self.manual_step_plus_500ms_button.setEnabled(manual_controls_enabled)
         self.manual_step_plus_sec_button.setEnabled(manual_controls_enabled)
         self.manual_set_start_button.setEnabled(manual_controls_enabled and manual_row_selected)
-        self.manual_set_end_button.setEnabled(manual_controls_enabled and manual_row_selected)
 
         self.load_timeline_button.setEnabled(mode_ready and (not any_running))
         self.save_timeline_button.setEnabled(mode_ready and (not any_running) and self._has_complete_event_times())
