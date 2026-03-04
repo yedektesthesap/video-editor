@@ -4666,33 +4666,17 @@ class MainWindow(QMainWindow):
         self._update_analysis_controls()
 
     def _has_complete_event_times(self) -> bool:
-        event_definitions = self._event_definitions_for_current_mode()
-        if len(self.last_detected_events) < len(event_definitions):
-            return False
-
-        is_manual = self.detection_mode == DETECTION_MODE_MANUAL
-        for row, _event_info in enumerate(event_definitions):
-            if row >= len(self.last_detected_events):
-                return False
-            event_payload = self.last_detected_events[row]
-            raw_start = event_payload.get("start")
-            if raw_start is None:
-                return False
-            try:
-                float(raw_start)
-            except (TypeError, ValueError):
-                return False
-            if is_manual:
-                continue
-            raw_end = event_payload.get("end")
-            if raw_end is None:
-                return False
-            try:
-                float(raw_end)
-            except (TypeError, ValueError):
-                return False
-
-        return True
+        for event_payload in self.last_detected_events:
+            for field_name in ("start", "end"):
+                raw_value = event_payload.get(field_name)
+                if raw_value is None:
+                    continue
+                try:
+                    float(raw_value)
+                except (TypeError, ValueError):
+                    continue
+                return True
+        return False
 
     def _set_event_frame_preview_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         if pixmap is None or pixmap.isNull():
@@ -5300,22 +5284,8 @@ class MainWindow(QMainWindow):
         self._update_analysis_controls()
 
     def _validate_manual_events_for_save(self) -> Optional[str]:
-        if len(self.last_detected_events) < len(MANUAL_EVENT_DEFINITIONS):
-            return "Manuel kayit icin tum event satirlari olusmamis."
-
-        for row, event_info in enumerate(MANUAL_EVENT_DEFINITIONS):
-            event_payload = self.last_detected_events[row] if row < len(self.last_detected_events) else {}
-            event_id = int(event_payload.get("id", event_info["id"]))
-            raw_start = event_payload.get("start")
-
-            if raw_start is None:
-                return f"Event {event_id} icin start bos birakilamaz."
-
-            try:
-                float(raw_start)
-            except (TypeError, ValueError):
-                return f"Event {event_id} start degeri gecersiz."
-
+        if not self._has_complete_event_times():
+            return "Kaydetmek icin en az bir event zamani girilmelidir."
         return None
 
     def _build_events_from_timeline_payload(self, payload: object) -> Tuple[Optional[list[dict]], Optional[str]]:
