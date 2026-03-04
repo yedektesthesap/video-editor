@@ -573,8 +573,19 @@ class VideoEditWorker(QObject):
 
             source_label = f"[{image_input_index}:v]"
             prepared_label = f"[img{image_index}]"
-            if width_value is not None and height_value is not None:
-                filter_parts.append(f"{source_label}scale={int(width_value)}:{int(height_value)}{prepared_label}")
+            try:
+                target_width = max(1, int(float(width_value))) if width_value is not None else None
+            except (TypeError, ValueError):
+                target_width = None
+            try:
+                target_height = max(1, int(float(height_value))) if height_value is not None else None
+            except (TypeError, ValueError):
+                target_height = None
+
+            if target_width is not None:
+                filter_parts.append(f"{source_label}scale={target_width}:-1:flags=lanczos,format=rgba{prepared_label}")
+            elif target_height is not None:
+                filter_parts.append(f"{source_label}scale=-1:{target_height}:flags=lanczos,format=rgba{prepared_label}")
             else:
                 filter_parts.append(f"{source_label}format=rgba{prepared_label}")
 

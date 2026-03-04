@@ -77,6 +77,11 @@ EDIT_TEXT_COL_SIZE = 4
 EDIT_TEXT_COL_COLOR = 5
 EDIT_TEXT_COL_BOLD = 6
 EDIT_TEXT_COL_ITALIC = 7
+EDIT_IMAGE_COL_FILE = 0
+EDIT_IMAGE_COL_START = 1
+EDIT_IMAGE_COL_END = 2
+EDIT_IMAGE_COL_POSITION = 3
+EDIT_IMAGE_COL_SIZE = 4
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
@@ -1958,13 +1963,30 @@ class MainWindow(QMainWindow):
         self.edit_image_overlay_enabled_checkbox.setChecked(False)
         self.edit_image_overlay_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
         image_overlay_layout.addWidget(self.edit_image_overlay_enabled_checkbox)
-        self.edit_image_overlay_table = QTableWidget(0, 7)
+        self.edit_image_overlay_table = QTableWidget(0, 5)
         self._configure_edit_overlay_table(
             self.edit_image_overlay_table,
-            ["Dosya", "Baslangic(sn)", "Bitis(sn)", "X(0-1)", "Y(0-1)", "Genislik(px)", "Yukseklik(px)"],
+            ["Dosya", "Baslangic(sn)", "Bitis(sn)", "Pozisyon(X,Y)", "Boyut(px)"],
         )
+        self.edit_image_time_delegate = FloatSpinDelegate(0.0, 86400.0, 3, 0.1, self.edit_image_overlay_table)
+        self.edit_image_size_delegate = IntSpinDelegate(1, 20000, 1, self.edit_image_overlay_table)
+        self.edit_image_overlay_table.setItemDelegateForColumn(EDIT_IMAGE_COL_START, self.edit_image_time_delegate)
+        self.edit_image_overlay_table.setItemDelegateForColumn(EDIT_IMAGE_COL_END, self.edit_image_time_delegate)
+        self.edit_image_overlay_table.setItemDelegateForColumn(EDIT_IMAGE_COL_SIZE, self.edit_image_size_delegate)
+        image_table_header = self.edit_image_overlay_table.horizontalHeader()
+        image_table_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        image_table_header.setStretchLastSection(False)
+        self.edit_image_overlay_table.setColumnWidth(EDIT_IMAGE_COL_FILE, 260)
+        self.edit_image_overlay_table.setColumnWidth(EDIT_IMAGE_COL_START, 120)
+        self.edit_image_overlay_table.setColumnWidth(EDIT_IMAGE_COL_END, 120)
+        self.edit_image_overlay_table.setColumnWidth(EDIT_IMAGE_COL_POSITION, 150)
+        self.edit_image_overlay_table.setColumnWidth(EDIT_IMAGE_COL_SIZE, 110)
+        self.edit_image_overlay_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.edit_image_overlay_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.edit_image_overlay_table.setWordWrap(False)
         self.edit_image_overlay_table.itemChanged.connect(self._on_edit_overlay_table_changed)
         self.edit_image_overlay_table.cellClicked.connect(self.on_edit_image_overlay_cell_clicked)
+        self.edit_image_overlay_table.installEventFilter(self)
         image_overlay_layout.addWidget(self.edit_image_overlay_table)
         image_button_layout = QHBoxLayout()
         image_button_layout.setContentsMargins(0, 0, 0, 0)
@@ -2540,60 +2562,240 @@ class MainWindow(QMainWindow):
             y_text = "0"
         return f"{x_text}, {y_text}"
 
+    @staticmethod
+    def _image_overlay_source_size(path_value: str) -> Optional[Tuple[int, int]]:
+        image_path = str(path_value).strip()
+        if not image_path or not os.path.isfile(image_path):
+            return None
+        image = QImage(image_path)
+        if image.isNull():
+            return None
+        source_width = int(image.width())
+        source_height = int(image.height())
+        if source_width <= 0 or source_height <= 0:
+            return None
+        return source_width, source_height
+
+    def _image_overlay_scaled_dimensions(self, path_value: str, size_value: int) -> Optional[Tuple[int, int]]:
+        source_size = self._image_overlay_source_size(path_value)
+        if source_size is None:
+            return None
+        source_width, source_height = source_size
+        target_width = max(1, int(size_value))
+        target_height = max(1, int(round(float(target_width) * float(source_height) / float(source_width))))
+        return target_width, target_height
+
     def eventFilter(self, watched, event) -> bool:
-        if (
-            hasattr(self, "edit_text_overlay_table")
-            and watched is self.edit_text_overlay_table
-            and isinstance(event, QKeyEvent)
-            and event.type() == QEvent.Type.KeyPress
-        ):
-            table = self.edit_text_overlay_table
-            if (
-                table.isEnabled()
-                and table.currentColumn() == EDIT_TEXT_COL_POSITION
-                and table.state() != QAbstractItemView.State.EditingState
-            ):
-                key_value = event.key()
-                if key_value in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
-                    row = table.currentRow()
-                    if row < 0:
+        if isinstance(event, QKeyEvent) and event.type() == QEvent.Type.KeyPress:
+            if hasattr(self, "edit_text_overlay_table") and watched is self.edit_text_overlay_table:
+                table = self.edit_text_overlay_table
+                if (
+                    table.isEnabled()
+                    and table.currentColumn() == EDIT_TEXT_COL_POSITION
+                    and table.state() != QAbstractItemView.State.EditingState
+                ):
+                    key_value = event.key()
+                    if key_value in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down):
+                        row = table.currentRow()
+                        if row < 0:
+                            return True
+                        item = table.item(row, EDIT_TEXT_COL_POSITION)
+                        if item is None:
+                            item = QTableWidgetItem("0, 0")
+                            table.setItem(row, EDIT_TEXT_COL_POSITION, item)
+                        parsed = self._parse_text_overlay_position(item.text())
+                        current_x, current_y = (0.0, 0.0) if parsed is None else parsed
+
+                        step = 0.01
+                        modifiers = event.modifiers()
+                        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                            step = 0.05
+                        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                            step = 0.002
+
+                        if key_value == Qt.Key.Key_Left:
+                            current_x -= step
+                        elif key_value == Qt.Key.Key_Right:
+                            current_x += step
+                        elif key_value == Qt.Key.Key_Up:
+                            current_y -= step
+                        elif key_value == Qt.Key.Key_Down:
+                            current_y += step
+
+                        position_text = self._format_text_overlay_position(current_x, current_y)
+                        table.blockSignals(True)
+                        try:
+                            item.setText(position_text)
+                        finally:
+                            table.blockSignals(False)
+                        self._update_edit_controls()
+                        self._update_edit_overlay_preview(force_frame_reload=False)
+                        self.statusBar().showMessage(
+                            f"Yazi konumu guncellendi: {position_text} (Shift: hizli, Ctrl: hassas)",
+                            1200,
+                        )
                         return True
-                    item = table.item(row, EDIT_TEXT_COL_POSITION)
-                    if item is None:
-                        item = QTableWidgetItem("0, 0")
-                        table.setItem(row, EDIT_TEXT_COL_POSITION, item)
-                    parsed = self._parse_text_overlay_position(item.text())
-                    current_x, current_y = (0.0, 0.0) if parsed is None else parsed
 
-                    step = 0.01
+            if hasattr(self, "edit_image_overlay_table") and watched is self.edit_image_overlay_table:
+                table = self.edit_image_overlay_table
+                if table.isEnabled() and table.state() != QAbstractItemView.State.EditingState:
+                    row = table.currentRow()
+                    col = table.currentColumn()
+                    key_value = event.key()
                     modifiers = event.modifiers()
-                    if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                        step = 0.05
-                    elif modifiers & Qt.KeyboardModifier.ControlModifier:
-                        step = 0.002
 
-                    if key_value == Qt.Key.Key_Left:
-                        current_x -= step
-                    elif key_value == Qt.Key.Key_Right:
-                        current_x += step
-                    elif key_value == Qt.Key.Key_Up:
-                        current_y -= step
-                    elif key_value == Qt.Key.Key_Down:
-                        current_y += step
+                    if row < 0:
+                        return key_value in (
+                            Qt.Key.Key_Left,
+                            Qt.Key.Key_Right,
+                            Qt.Key.Key_Up,
+                            Qt.Key.Key_Down,
+                        )
 
-                    position_text = self._format_text_overlay_position(current_x, current_y)
-                    table.blockSignals(True)
-                    try:
-                        item.setText(position_text)
-                    finally:
-                        table.blockSignals(False)
-                    self._update_edit_controls()
-                    self._update_edit_overlay_preview(force_frame_reload=False)
-                    self.statusBar().showMessage(
-                        f"Yazi konumu guncellendi: {position_text} (Shift: hizli, Ctrl: hassas)",
-                        1200,
-                    )
-                    return True
+                    if (
+                        col == EDIT_IMAGE_COL_POSITION
+                        and key_value in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down)
+                    ):
+                        item = table.item(row, EDIT_IMAGE_COL_POSITION)
+                        if item is None:
+                            item = QTableWidgetItem("0, 0")
+                            table.setItem(row, EDIT_IMAGE_COL_POSITION, item)
+                        parsed = self._parse_text_overlay_position(item.text())
+                        current_x, current_y = (0.0, 0.0) if parsed is None else parsed
+
+                        step = 0.01
+                        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                            step = 0.05
+                        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                            step = 0.002
+
+                        if key_value == Qt.Key.Key_Left:
+                            current_x -= step
+                        elif key_value == Qt.Key.Key_Right:
+                            current_x += step
+                        elif key_value == Qt.Key.Key_Up:
+                            current_y -= step
+                        elif key_value == Qt.Key.Key_Down:
+                            current_y += step
+
+                        position_text = self._format_text_overlay_position(current_x, current_y)
+                        table.blockSignals(True)
+                        try:
+                            item.setText(position_text)
+                        finally:
+                            table.blockSignals(False)
+                        self._update_edit_controls()
+                        self._update_edit_overlay_preview(force_frame_reload=False)
+                        self.statusBar().showMessage(
+                            f"PNG konumu guncellendi: {position_text} (Shift: hizli, Ctrl: hassas)",
+                            1200,
+                        )
+                        return True
+
+                    if col in (EDIT_IMAGE_COL_START, EDIT_IMAGE_COL_END) and key_value in (
+                        Qt.Key.Key_Left,
+                        Qt.Key.Key_Right,
+                        Qt.Key.Key_Up,
+                        Qt.Key.Key_Down,
+                    ):
+                        item = table.item(row, col)
+                        if item is None:
+                            default_time = "0.0" if col == EDIT_IMAGE_COL_START else "1.0"
+                            item = QTableWidgetItem(default_time)
+                            table.setItem(row, col, item)
+                        try:
+                            current_value = float(item.text().strip())
+                        except (TypeError, ValueError):
+                            current_value = 0.0 if col == EDIT_IMAGE_COL_START else 1.0
+
+                        step = 0.1
+                        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                            step = 1.0
+                        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                            step = 0.01
+
+                        if key_value in (Qt.Key.Key_Left, Qt.Key.Key_Down):
+                            current_value -= step
+                        else:
+                            current_value += step
+                        current_value = max(0.0, current_value)
+
+                        try:
+                            row_start = float(self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_START))
+                        except (TypeError, ValueError):
+                            row_start = None
+                        try:
+                            row_end = float(self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_END))
+                        except (TypeError, ValueError):
+                            row_end = None
+
+                        if col == EDIT_IMAGE_COL_START and row_end is not None:
+                            current_value = min(current_value, max(0.0, row_end - 0.001))
+                        if col == EDIT_IMAGE_COL_END and row_start is not None:
+                            current_value = max(current_value, row_start + 0.001)
+
+                        time_text = self._format_overlay_number(current_value, 3)
+                        table.blockSignals(True)
+                        try:
+                            item.setText(time_text)
+                        finally:
+                            table.blockSignals(False)
+                        self._update_edit_controls()
+                        self._update_edit_overlay_preview(force_frame_reload=False)
+                        self.statusBar().showMessage(
+                            f"PNG zamani guncellendi: {time_text} sn (Shift: hizli, Ctrl: hassas)",
+                            1200,
+                        )
+                        return True
+
+                    if col == EDIT_IMAGE_COL_SIZE and key_value in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                        item = table.item(row, EDIT_IMAGE_COL_SIZE)
+                        if item is None:
+                            item = QTableWidgetItem("")
+                            table.setItem(row, EDIT_IMAGE_COL_SIZE, item)
+
+                        size_text_raw = item.text().strip()
+                        if size_text_raw:
+                            try:
+                                current_size = max(1, int(float(size_text_raw)))
+                            except (TypeError, ValueError):
+                                current_size = 100
+                        else:
+                            path_value = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_FILE)
+                            source_size = self._image_overlay_source_size(path_value)
+                            current_size = source_size[0] if source_size is not None else 100
+
+                        step = 10
+                        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                            step = 50
+                        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                            step = 2
+
+                        if key_value == Qt.Key.Key_Up:
+                            current_size += step
+                        else:
+                            current_size -= step
+                        current_size = max(1, current_size)
+
+                        table.blockSignals(True)
+                        try:
+                            item.setText(str(current_size))
+                        finally:
+                            table.blockSignals(False)
+
+                        path_value = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_FILE)
+                        scaled_size = self._image_overlay_scaled_dimensions(path_value, current_size)
+                        self._update_edit_controls()
+                        self._update_edit_overlay_preview(force_frame_reload=False)
+                        if scaled_size is None:
+                            size_message = f"{current_size}px"
+                        else:
+                            size_message = f"{scaled_size[0]}x{scaled_size[1]} px"
+                        self.statusBar().showMessage(
+                            f"PNG boyutu guncellendi: {size_message} (Shift: hizli, Ctrl: hassas)",
+                            1200,
+                        )
+                        return True
 
         return super().eventFilter(watched, event)
 
@@ -2602,7 +2804,7 @@ class MainWindow(QMainWindow):
         try:
             self._set_table_row_values(
                 self.edit_image_overlay_table,
-                ["", "0.0", "1.0", "0.10", "0.10", "", ""],
+                ["", "0.0", "1.0", "0.10, 0.10", ""],
             )
         finally:
             self.edit_image_overlay_table.blockSignals(False)
@@ -2617,14 +2819,28 @@ class MainWindow(QMainWindow):
     def on_edit_image_overlay_cell_clicked(self, row: int, col: int) -> None:
         if not hasattr(self, "edit_image_overlay_table"):
             return
-        if col != 0:
-            return
 
         table = self.edit_image_overlay_table
         if row < 0 or row >= table.rowCount() or not table.isEnabled():
             return
 
-        current_value = self._edit_table_cell_text(table, row, 0)
+        if col != EDIT_IMAGE_COL_FILE:
+            if col in (EDIT_IMAGE_COL_START, EDIT_IMAGE_COL_END, EDIT_IMAGE_COL_SIZE):
+                if table.state() == QAbstractItemView.State.EditingState:
+                    return
+                item = table.item(row, col)
+                if item is None:
+                    default_value = ""
+                    if col == EDIT_IMAGE_COL_START:
+                        default_value = "0.0"
+                    elif col == EDIT_IMAGE_COL_END:
+                        default_value = "1.0"
+                    item = QTableWidgetItem(default_value)
+                    table.setItem(row, col, item)
+                table.editItem(item)
+            return
+
+        current_value = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_FILE)
         initial_dir = ""
         if current_value:
             if os.path.isfile(current_value):
@@ -2651,10 +2867,10 @@ class MainWindow(QMainWindow):
 
         table.blockSignals(True)
         try:
-            item = table.item(row, 0)
+            item = table.item(row, EDIT_IMAGE_COL_FILE)
             if item is None:
                 item = QTableWidgetItem(selected_path)
-                table.setItem(row, 0, item)
+                table.setItem(row, EDIT_IMAGE_COL_FILE, item)
             else:
                 item.setText(selected_path)
         finally:
@@ -2754,13 +2970,19 @@ class MainWindow(QMainWindow):
             overlay_pixmap = QPixmap.fromImage(image)
             width_value = overlay.get("width")
             height_value = overlay.get("height")
-            if width_value is not None and height_value is not None:
-                target_width = max(1, int(width_value))
-                target_height = max(1, int(height_value))
+            if width_value is not None or height_value is not None:
+                try:
+                    target_width = max(1, int(width_value)) if width_value is not None else overlay_pixmap.width()
+                except (TypeError, ValueError):
+                    target_width = overlay_pixmap.width()
+                try:
+                    target_height = max(1, int(height_value)) if height_value is not None else overlay_pixmap.height()
+                except (TypeError, ValueError):
+                    target_height = overlay_pixmap.height()
                 overlay_pixmap = overlay_pixmap.scaled(
                     target_width,
                     target_height,
-                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
             painter.drawPixmap(draw_x, draw_y, overlay_pixmap)
@@ -3523,15 +3745,13 @@ class MainWindow(QMainWindow):
 
         table = self.edit_image_overlay_table
         for row in range(table.rowCount()):
-            path_value = self._edit_table_cell_text(table, row, 0)
-            start_raw = self._edit_table_cell_text(table, row, 1)
-            end_raw = self._edit_table_cell_text(table, row, 2)
-            x_raw = self._edit_table_cell_text(table, row, 3)
-            y_raw = self._edit_table_cell_text(table, row, 4)
-            width_raw = self._edit_table_cell_text(table, row, 5)
-            height_raw = self._edit_table_cell_text(table, row, 6)
+            path_value = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_FILE)
+            start_raw = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_START)
+            end_raw = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_END)
+            position_raw = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_POSITION)
+            size_raw = self._edit_table_cell_text(table, row, EDIT_IMAGE_COL_SIZE)
 
-            row_values = [path_value, start_raw, end_raw, x_raw, y_raw, width_raw, height_raw]
+            row_values = [path_value, start_raw, end_raw, position_raw, size_raw]
             if not any(row_values):
                 continue
             if not path_value:
@@ -3540,12 +3760,15 @@ class MainWindow(QMainWindow):
                 return [], f"PNG katmani satir {row + 1}: Dosya bulunamadi ({path_value})."
             if not start_raw or not end_raw:
                 return [], f"PNG katmani satir {row + 1}: Baslangic ve bitis zorunlu."
+            position_pair = self._parse_text_overlay_position(position_raw)
+            if position_pair is None:
+                return [], f"PNG katmani satir {row + 1}: Pozisyon X,Y formatinda olmali."
 
             try:
                 start_seconds = float(start_raw)
                 end_seconds = float(end_raw)
-                x_value = float(x_raw)
-                y_value = float(y_raw)
+                x_value = float(position_pair[0])
+                y_value = float(position_pair[1])
             except (TypeError, ValueError):
                 return [], f"PNG katmani satir {row + 1}: Sayisal alanlar gecersiz."
 
@@ -3558,16 +3781,17 @@ class MainWindow(QMainWindow):
 
             width_value: Optional[int] = None
             height_value: Optional[int] = None
-            if width_raw or height_raw:
-                if (not width_raw) or (not height_raw):
-                    return [], f"PNG katmani satir {row + 1}: Genislik ve yukseklik birlikte girilmeli."
+            if size_raw:
                 try:
-                    width_value = int(width_raw)
-                    height_value = int(height_raw)
+                    requested_width = int(float(size_raw))
                 except (TypeError, ValueError):
-                    return [], f"PNG katmani satir {row + 1}: Genislik/yukseklik tam sayi olmali."
-                if width_value <= 0 or height_value <= 0:
-                    return [], f"PNG katmani satir {row + 1}: Genislik/yukseklik pozitif olmali."
+                    return [], f"PNG katmani satir {row + 1}: Boyut tam sayi olmali."
+                if requested_width <= 0:
+                    return [], f"PNG katmani satir {row + 1}: Boyut pozitif olmali."
+                scaled_size = self._image_overlay_scaled_dimensions(path_value, requested_width)
+                if scaled_size is None:
+                    return [], f"PNG katmani satir {row + 1}: Boyut icin gorsel okunamadi."
+                width_value, height_value = scaled_size
 
             overlays.append(
                 {
