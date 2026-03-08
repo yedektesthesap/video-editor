@@ -2314,30 +2314,21 @@ class MainWindow(QMainWindow):
         return bool(default)
 
     @staticmethod
-    def _parse_positive_overlay_id(raw_value: object) -> Optional[int]:
-        text = str(raw_value).strip()
-        if not text:
-            return None
-        try:
-            value = int(text)
-        except (TypeError, ValueError):
-            return None
-        if value <= 0:
-            return None
-        return value
+    def _normalize_text_overlay_id(raw_value: object) -> str:
+        return str(raw_value).strip()
 
-    def _next_text_overlay_id(self, used_ids: Optional[set[int]] = None, include_table: bool = True) -> int:
+    def _next_text_overlay_id(self, used_ids: Optional[set[str]] = None, include_table: bool = True) -> str:
         existing_ids = set(used_ids or set())
         if include_table and hasattr(self, "edit_text_overlay_table"):
             table = self.edit_text_overlay_table
             for row in range(table.rowCount()):
-                parsed_id = self._parse_positive_overlay_id(self._edit_table_cell_text(table, row, EDIT_TEXT_COL_ID))
-                if parsed_id is not None:
-                    existing_ids.add(parsed_id)
+                existing_id = self._normalize_text_overlay_id(self._edit_table_cell_text(table, row, EDIT_TEXT_COL_ID))
+                if existing_id:
+                    existing_ids.add(existing_id)
         candidate = 1
-        while candidate in existing_ids:
+        while str(candidate) in existing_ids:
             candidate += 1
-        return candidate
+        return str(candidate)
 
     def _append_text_overlay_row(
         self,
@@ -2481,23 +2472,19 @@ class MainWindow(QMainWindow):
             return
 
         imported_rows: list[tuple[list[str], bool, bool]] = []
-        used_ids: set[int] = set()
+        used_ids: set[str] = set()
         for index, raw_item in enumerate(raw_items, start=1):
             if not isinstance(raw_item, dict):
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Veri dict formatinda olmali.")
                 return
             raw_id = raw_item.get("id")
-            raw_id_text = str(raw_id).strip() if raw_id is not None else ""
-            overlay_id = self._parse_positive_overlay_id(raw_id_text) if raw_id_text else None
-            if raw_id_text and overlay_id is None:
-                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: ID pozitif tam sayi olmali.")
-                return
-            if overlay_id is None:
+            overlay_id = self._normalize_text_overlay_id(raw_id) if raw_id is not None else ""
+            if not overlay_id:
                 overlay_id = self._next_text_overlay_id(used_ids, include_table=False)
             if overlay_id in used_ids:
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: ID tekrar ediyor ({overlay_id}).")
                 return
-            used_ids.add(int(overlay_id))
+            used_ids.add(overlay_id)
             text_value = str(raw_item.get("text", "")).strip()
             if not text_value:
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Metin bos olamaz.")
@@ -2553,7 +2540,7 @@ class MainWindow(QMainWindow):
             imported_rows.append(
                 (
                     [
-                        str(int(overlay_id)),
+                        overlay_id,
                         text_value,
                         self._format_overlay_number(start_seconds, 3),
                         self._format_overlay_number(end_seconds, 3),
@@ -3890,7 +3877,7 @@ class MainWindow(QMainWindow):
             return overlays, None
 
         table = self.edit_text_overlay_table
-        seen_ids: set[int] = set()
+        seen_ids: set[str] = set()
         for row in range(table.rowCount()):
             overlay_id_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_ID)
             text_value = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_TEXT)
@@ -3905,12 +3892,12 @@ class MainWindow(QMainWindow):
             row_values = [text_value, start_raw, end_raw, position_raw, font_size_raw, color_raw]
             if not any(row_values):
                 continue
-            overlay_id = self._parse_positive_overlay_id(overlay_id_raw)
-            if overlay_id is None:
-                return [], f"Yazi katmani satir {row + 1}: ID pozitif tam sayi olmali."
+            overlay_id = self._normalize_text_overlay_id(overlay_id_raw)
+            if not overlay_id:
+                return [], f"Yazi katmani satir {row + 1}: ID bos olamaz."
             if overlay_id in seen_ids:
                 return [], f"Yazi katmani satir {row + 1}: ID tekrar ediyor ({overlay_id})."
-            seen_ids.add(int(overlay_id))
+            seen_ids.add(overlay_id)
             if not text_value:
                 return [], f"Yazi katmani satir {row + 1}: Metin bos olamaz."
             if not start_raw or not end_raw:
@@ -3944,7 +3931,7 @@ class MainWindow(QMainWindow):
 
             overlays.append(
                 {
-                    "id": int(overlay_id),
+                    "id": overlay_id,
                     "text": text_value,
                     "start": round(start_seconds, 6),
                     "end": round(end_seconds, 6),
