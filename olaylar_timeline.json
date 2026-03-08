@@ -1,0 +1,367 @@
+{
+  "source_video": "C:/Users/Broke/Downloads/VID_20260201_222033 (1).mp4",
+  "template_path": "C:/Users/Broke/Desktop/YSN/workspace/video-editor/template1.json",
+  "sample_hz": 10,
+  "events": [
+    {
+      "id": 1,
+      "name": "sol1_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 7.24,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 2,
+      "name": "sol1_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 8.83,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 3,
+      "name": "sol2_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 10.53,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 4,
+      "name": "sol2_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 12.03,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 5,
+      "name": "sol2_al2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 13.38,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 6,
+      "name": "sol2_koy2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 14.87,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 7,
+      "name": "sol3_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 16.32,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 8,
+      "name": "sol3_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 17.82,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 9,
+      "name": "sol3_al2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 19.16,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 10,
+      "name": "sol3_koy2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 20.51,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 11,
+      "name": "sol3_al3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 21.76,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 12,
+      "name": "sol3_koy3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 23.36,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 13,
+      "name": "sol4_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 24.55,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 14,
+      "name": "sol4_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 26.0,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 15,
+      "name": "sol4_al2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 26.95,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 16,
+      "name": "sol4_koy2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 28.4,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 17,
+      "name": "sol4_al3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 29.45,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 18,
+      "name": "sol4_koy3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 30.79,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 19,
+      "name": "sol4_al4",
+      "target_roi": "",
+      "type": "manual",
+      "start": 31.89,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 20,
+      "name": "sol4_koy4",
+      "target_roi": "",
+      "type": "manual",
+      "start": 33.49,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 21,
+      "name": "sag4_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 97.93,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 22,
+      "name": "sag4_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 99.73,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 23,
+      "name": "sag3_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 115.6,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 24,
+      "name": "sag3_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 117.2,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 25,
+      "name": "sag3_al2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 118.3,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 26,
+      "name": "sag3_koy2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 119.79,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 27,
+      "name": "sag2_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 136.13,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 28,
+      "name": "sag2_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 137.53,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 29,
+      "name": "sag2_al2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 138.48,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 30,
+      "name": "sag2_koy2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 139.82,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 31,
+      "name": "sag2_al3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 140.92,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 32,
+      "name": "sag2_koy3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 142.27,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 33,
+      "name": "sag1_al1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 167.82,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 34,
+      "name": "sag1_koy1",
+      "target_roi": "",
+      "type": "manual",
+      "start": 169.27,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 35,
+      "name": "sag1_al2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 170.22,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 36,
+      "name": "sag1_koy2",
+      "target_roi": "",
+      "type": "manual",
+      "start": 171.36,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 37,
+      "name": "sag1_al3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 172.31,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 38,
+      "name": "sag1_koy3",
+      "target_roi": "",
+      "type": "manual",
+      "start": 173.66,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 39,
+      "name": "sag1_al4",
+      "target_roi": "",
+      "type": "manual",
+      "start": 174.61,
+      "end": null,
+      "confidence": null
+    },
+    {
+      "id": 40,
+      "name": "sag1_koy4",
+      "target_roi": "",
+      "type": "manual",
+      "start": 175.96,
+      "end": null,
+      "confidence": null
+    }
+  ]
+}
