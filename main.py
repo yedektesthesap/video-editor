@@ -2023,12 +2023,15 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_add_button.clicked.connect(self.on_add_text_overlay_row_clicked)
         self.edit_text_overlay_remove_button = QPushButton("Satir Sil")
         self.edit_text_overlay_remove_button.clicked.connect(self.on_remove_text_overlay_row_clicked)
+        self.edit_text_overlay_set_event_time_button = QPushButton("Set Event Time")
+        self.edit_text_overlay_set_event_time_button.clicked.connect(self.on_set_text_overlay_times_from_events_clicked)
         self.edit_text_overlay_save_button = QPushButton("Yazilari Kaydet")
         self.edit_text_overlay_save_button.clicked.connect(self.on_save_text_overlay_rows_clicked)
         self.edit_text_overlay_import_button = QPushButton("Yazilari Import Et")
         self.edit_text_overlay_import_button.clicked.connect(self.on_import_text_overlay_rows_clicked)
         text_button_layout.addWidget(self.edit_text_overlay_add_button)
         text_button_layout.addWidget(self.edit_text_overlay_remove_button)
+        text_button_layout.addWidget(self.edit_text_overlay_set_event_time_button)
         text_button_layout.addWidget(self.edit_text_overlay_save_button)
         text_button_layout.addWidget(self.edit_text_overlay_import_button)
         text_button_layout.addStretch(1)
@@ -2380,6 +2383,83 @@ class MainWindow(QMainWindow):
         self._remove_selected_table_row(self.edit_text_overlay_table)
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
+
+    def on_set_text_overlay_times_from_events_clicked(self) -> None:
+        if not hasattr(self, "edit_text_overlay_table"):
+            return
+        if not self.last_detected_events:
+            QMessageBox.information(self, "Yazi Katmanlari", "Once olay zamanlarini yukleyin veya olusturun.")
+            return
+
+        video_duration = self._video_duration_seconds()
+        if video_duration is None or video_duration <= 0.0:
+            QMessageBox.warning(self, "Yazi Katmanlari", "Video suresi belirlenemedi.")
+            return
+
+        event_start_times: dict[str, float] = {}
+        for event_payload in self.last_detected_events:
+            if not isinstance(event_payload, dict):
+                continue
+            event_name = str(event_payload.get("name", "")).strip()
+            if not event_name or event_name in event_start_times:
+                continue
+            raw_start = event_payload.get("start")
+            if raw_start is None:
+                continue
+            try:
+                start_seconds = float(raw_start)
+            except (TypeError, ValueError):
+                continue
+            if 0.0 <= start_seconds < float(video_duration):
+                event_start_times[event_name] = start_seconds
+
+        if not event_start_times:
+            QMessageBox.information(self, "Yazi Katmanlari", "Kullanilabilir event start zamani bulunamadi.")
+            return
+
+        table = self.edit_text_overlay_table
+        updated_count = 0
+        skipped_ids: list[str] = []
+        table.blockSignals(True)
+        try:
+            for row in range(table.rowCount()):
+                overlay_id = self._normalize_text_overlay_id(self._edit_table_cell_text(table, row, EDIT_TEXT_COL_ID))
+                if not overlay_id:
+                    continue
+                event_start = event_start_times.get(overlay_id)
+                if event_start is None:
+                    skipped_ids.append(overlay_id)
+                    continue
+
+                start_item = table.item(row, EDIT_TEXT_COL_START)
+                if start_item is None:
+                    start_item = QTableWidgetItem("")
+                    table.setItem(row, EDIT_TEXT_COL_START, start_item)
+                end_item = table.item(row, EDIT_TEXT_COL_END)
+                if end_item is None:
+                    end_item = QTableWidgetItem("")
+                    table.setItem(row, EDIT_TEXT_COL_END, end_item)
+
+                start_item.setText(self._format_overlay_number(event_start, 3))
+                end_item.setText(self._format_overlay_number(video_duration, 3))
+                updated_count += 1
+        finally:
+            table.blockSignals(False)
+
+        self._update_edit_controls()
+        self._update_edit_overlay_preview(force_frame_reload=False)
+
+        if updated_count <= 0:
+            QMessageBox.information(self, "Yazi Katmanlari", "Eslesen event adi bulunamadi.")
+            return
+
+        skipped_text = ""
+        if skipped_ids:
+            unique_skipped = ", ".join(dict.fromkeys(skipped_ids))
+            skipped_text = f" | Eslesmeyen ID: {unique_skipped}"
+        message = f"{updated_count} yazi satiri event zamanina gore guncellendi{skipped_text}"
+        self.statusBar().showMessage(message, 4500)
+        self._append_edit_log(message)
 
     @staticmethod
     def _format_overlay_number(value: float, decimals: int = 6) -> str:
@@ -4347,6 +4427,8 @@ class MainWindow(QMainWindow):
             self.edit_text_overlay_save_button.setEnabled(not is_running)
         if hasattr(self, "edit_text_overlay_import_button"):
             self.edit_text_overlay_import_button.setEnabled(not is_running)
+        if hasattr(self, "edit_text_overlay_set_event_time_button"):
+            self.edit_text_overlay_set_event_time_button.setEnabled(not is_running)
         if hasattr(self, "edit_image_overlay_enabled_checkbox"):
             self.edit_image_overlay_enabled_checkbox.setEnabled(not is_running)
         if hasattr(self, "edit_image_overlay_table"):
