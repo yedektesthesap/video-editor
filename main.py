@@ -143,6 +143,14 @@ MANUAL_EVENT_DEFINITIONS: list[dict[str, object]] = [
     }
     for idx, name in enumerate(MANUAL_EVENT_NAMES)
 ]
+CUT_EVENT_SEGMENT_RULES: list[tuple[str, str, float]] = [
+    ("sol1_al1", "sol4_koy4", 0.0),
+    ("sag4_al1", "sag4_koy1", 3.0),
+    ("sag3_al1", "sag3_koy2", 3.0),
+    ("sag2_al1", "sag2_koy3", 3.0),
+    ("sag1_al1", "sag1_koy4", 3.0),
+]
+CUT_VIDEO_TAIL_SECONDS = 3.0
 EDIT_RESOLUTION_PRESETS: list[tuple[str, tuple[int, int]]] = [
     ("2160p (3840x2160)", (3840, 2160)),
     ("1440p (2560x1440)", (2560, 1440)),
@@ -1885,8 +1893,25 @@ class MainWindow(QMainWindow):
         self.edit_cut_enabled_checkbox.setChecked(True)
         self.edit_cut_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
 
+        self.edit_cut_info_label = QLabel("i")
+        self.edit_cut_info_label.setFixedSize(18, 18)
+        self.edit_cut_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.edit_cut_info_label.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self.edit_cut_info_label.setToolTip(self._build_cut_rule_tooltip())
+        self.edit_cut_info_label.setStyleSheet(
+            "background-color: #263142; color: #dbe5f5; border: 1px solid #3d4c61; "
+            "border-radius: 9px; font-weight: 700;"
+        )
+
         self.edit_segments_label = QLabel("Hazir segment: -")
         self.edit_segments_label.setStyleSheet("color: #9aa4b7;")
+
+        cut_header_layout = QHBoxLayout()
+        cut_header_layout.setContentsMargins(0, 0, 0, 0)
+        cut_header_layout.setSpacing(6)
+        cut_header_layout.addWidget(self.edit_cut_enabled_checkbox)
+        cut_header_layout.addStretch(1)
+        cut_header_layout.addWidget(self.edit_cut_info_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         quality_layout = QHBoxLayout()
         quality_layout.setContentsMargins(0, 0, 0, 0)
@@ -1906,7 +1931,7 @@ class MainWindow(QMainWindow):
         quality_layout.addWidget(self.edit_crf_spin)
         quality_layout.addStretch(1)
 
-        cut_layout.addWidget(self.edit_cut_enabled_checkbox)
+        cut_layout.addLayout(cut_header_layout)
         cut_layout.addWidget(self.edit_segments_label)
         cut_layout.addLayout(quality_layout)
         top_layout.addWidget(self.edit_cut_group)
@@ -3534,27 +3559,71 @@ class MainWindow(QMainWindow):
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
 
+    @staticmethod
+    def _build_cut_rule_tooltip() -> str:
+        return (
+            "Cut sabit plan ile calisir:\n"
+            "1. sol1_al1 -> sol4_koy4\n"
+            "2. sag4_al1 -> sag4_koy1 + 3 sn\n"
+            "3. sag3_al1 -> sag3_koy2 + 3 sn\n"
+            "4. sag2_al1 -> sag2_koy3 + 3 sn\n"
+            "5. sag1_al1 -> sag1_koy4 + 3 sn\n"
+            "6. Videonun son 3 saniyesi\n"
+            "Not: eski start/end eslestirmesi artik kullanilmaz."
+        )
+
+    def _video_duration_seconds(self) -> Optional[float]:
+        if self.video_meta is None:
+            return None
+        fps = max(0.0, float(self.video_meta.fps))
+        if fps <= 0.0:
+            return None
+        if self.video_frame_count > 0:
+            return max(0.0, float(self.video_frame_count) / fps)
+        if int(self.video_meta.frame_index) > 0:
+            return max(0.0, float(self.video_meta.frame_index) / fps)
+        return None
+
     def _build_merged_cut_segments(self) -> Tuple[Optional[list[tuple[float, float]]], Optional[str]]:
-        event_definitions = self._event_definitions_for_current_mode()
-        if len(self.last_detected_events) < len(event_definitions):
-            return None, "Kesim icin tum event satirlarinda start/end degeri dolu olmalidir."
+        if not self.last_detected_events:
+            return None, "Kesim icin timeline olaylari bulunamadi."
+
+        video_duration = self._video_duration_seconds()
+        if video_duration is None or video_duration <= 0.0:
+            return None, "Videonun suresi belirlenemedi."
+
+        event_times: dict[str, float] = {}
+        for event_payload in self.last_detected_events:
+            if not isinstance(event_payload, dict):
+                continue
+            event_name = str(event_payload.get("name", "")).strip()
+            if not event_name:
+                continue
+            raw_start = event_payload.get("start")
+            if raw_start is None:
+                continue
+            try:
+                event_times[event_name] = float(raw_start)
+            except (TypeError, ValueError):
+                return None, f"{event_name} zaman bilgisi gecersiz."
 
         raw_segments: list[tuple[float, float]] = []
-        for row, event_info in enumerate(event_definitions):
-            event_payload = self.last_detected_events[row] if row < len(self.last_detected_events) else {}
-            event_id = int(event_payload.get("id", event_info["id"]))
-            raw_start = event_payload.get("start")
-            raw_end = event_payload.get("end")
-            if raw_start is None or raw_end is None:
-                return None, f"Event {event_id} icin start/end bos birakilamaz."
-            try:
-                start_seconds = float(raw_start)
-                end_seconds = float(raw_end)
-            except (TypeError, ValueError):
-                return None, f"Event {event_id} zaman bilgisi gecersiz."
-            if end_seconds <= start_seconds:
-                return None, f"Event {event_id} icin end zamani start zamanindan buyuk olmalidir."
-            raw_segments.append((start_seconds, end_seconds))
+        for start_name, end_name, end_offset_seconds in CUT_EVENT_SEGMENT_RULES:
+            start_seconds = event_times.get(start_name)
+            if start_seconds is None:
+                return None, f"Cut icin {start_name} zamani gerekli."
+            end_marker_seconds = event_times.get(end_name)
+            if end_marker_seconds is None:
+                return None, f"Cut icin {end_name} zamani gerekli."
+            segment_start = max(0.0, min(float(start_seconds), video_duration))
+            segment_end = max(0.0, min(float(end_marker_seconds) + float(end_offset_seconds), video_duration))
+            if segment_end <= segment_start:
+                return None, f"Cut araligi gecersiz: {start_name} -> {end_name}"
+            raw_segments.append((segment_start, segment_end))
+
+        tail_start = max(0.0, float(video_duration) - CUT_VIDEO_TAIL_SECONDS)
+        if video_duration > tail_start:
+            raw_segments.append((tail_start, float(video_duration)))
 
         if not raw_segments:
             return None, "Gecerli kesim araligi bulunamadi."
