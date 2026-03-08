@@ -72,14 +72,15 @@ EVENT_COL_END = 5
 EVENT_COL_CONFIDENCE = 6
 EVENT_COL_TARGET_ROI = 2
 EVENT_COL_TYPE = 3
-EDIT_TEXT_COL_TEXT = 0
-EDIT_TEXT_COL_START = 1
-EDIT_TEXT_COL_END = 2
-EDIT_TEXT_COL_POSITION = 3
-EDIT_TEXT_COL_SIZE = 4
-EDIT_TEXT_COL_COLOR = 5
-EDIT_TEXT_COL_BOLD = 6
-EDIT_TEXT_COL_ITALIC = 7
+EDIT_TEXT_COL_ID = 0
+EDIT_TEXT_COL_TEXT = 1
+EDIT_TEXT_COL_START = 2
+EDIT_TEXT_COL_END = 3
+EDIT_TEXT_COL_POSITION = 4
+EDIT_TEXT_COL_SIZE = 5
+EDIT_TEXT_COL_COLOR = 6
+EDIT_TEXT_COL_BOLD = 7
+EDIT_TEXT_COL_ITALIC = 8
 EDIT_IMAGE_COL_FILE = 0
 EDIT_IMAGE_COL_START = 1
 EDIT_IMAGE_COL_END = 2
@@ -1983,10 +1984,10 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_enabled_checkbox.setChecked(False)
         self.edit_text_overlay_enabled_checkbox.stateChanged.connect(self._on_edit_operation_checkbox_changed)
         text_overlay_layout.addWidget(self.edit_text_overlay_enabled_checkbox)
-        self.edit_text_overlay_table = QTableWidget(0, 8)
+        self.edit_text_overlay_table = QTableWidget(0, 9)
         self._configure_edit_overlay_table(
             self.edit_text_overlay_table,
-            ["Metin", "Baslangic(sn)", "Bitis(sn)", "Pozisyon(X,Y)", "Boyut(px)", "Renk(#RRGGBB)", "Bold", "Italik"],
+            ["ID", "Metin", "Baslangic(sn)", "Bitis(sn)", "Pozisyon(X,Y)", "Boyut(px)", "Renk(#RRGGBB)", "Bold", "Italik"],
         )
         self.edit_text_time_delegate = FloatSpinDelegate(0.0, 86400.0, 3, 0.1, self.edit_text_overlay_table)
         self.edit_text_size_delegate = IntSpinDelegate(8, 256, 1, self.edit_text_overlay_table)
@@ -1996,6 +1997,7 @@ class MainWindow(QMainWindow):
         text_table_header = self.edit_text_overlay_table.horizontalHeader()
         text_table_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         text_table_header.setStretchLastSection(False)
+        self.edit_text_overlay_table.setColumnWidth(EDIT_TEXT_COL_ID, 70)
         self.edit_text_overlay_table.setColumnWidth(EDIT_TEXT_COL_TEXT, 200)
         self.edit_text_overlay_table.setColumnWidth(EDIT_TEXT_COL_START, 120)
         self.edit_text_overlay_table.setColumnWidth(EDIT_TEXT_COL_END, 120)
@@ -2311,8 +2313,35 @@ class MainWindow(QMainWindow):
             return False
         return bool(default)
 
+    @staticmethod
+    def _parse_positive_overlay_id(raw_value: object) -> Optional[int]:
+        text = str(raw_value).strip()
+        if not text:
+            return None
+        try:
+            value = int(text)
+        except (TypeError, ValueError):
+            return None
+        if value <= 0:
+            return None
+        return value
+
+    def _next_text_overlay_id(self, used_ids: Optional[set[int]] = None, include_table: bool = True) -> int:
+        existing_ids = set(used_ids or set())
+        if include_table and hasattr(self, "edit_text_overlay_table"):
+            table = self.edit_text_overlay_table
+            for row in range(table.rowCount()):
+                parsed_id = self._parse_positive_overlay_id(self._edit_table_cell_text(table, row, EDIT_TEXT_COL_ID))
+                if parsed_id is not None:
+                    existing_ids.add(parsed_id)
+        candidate = 1
+        while candidate in existing_ids:
+            candidate += 1
+        return candidate
+
     def _append_text_overlay_row(
         self,
+        id_value: str,
         text_value: str,
         start_value: str,
         end_value: str,
@@ -2327,7 +2356,7 @@ class MainWindow(QMainWindow):
         table = self.edit_text_overlay_table
         self._set_table_row_values(
             table,
-            [text_value, start_value, end_value, position_value, size_value, color_value, "", ""],
+            [id_value, text_value, start_value, end_value, position_value, size_value, color_value, "", ""],
         )
         row = table.rowCount() - 1
         self._set_text_overlay_style_cell(row, EDIT_TEXT_COL_BOLD, checked=bold)
@@ -2337,6 +2366,7 @@ class MainWindow(QMainWindow):
         self.edit_text_overlay_table.blockSignals(True)
         try:
             self._append_text_overlay_row(
+                id_value=str(self._next_text_overlay_id()),
                 text_value="ornek yazi",
                 start_value="0.0",
                 end_value="1.0",
@@ -2451,10 +2481,23 @@ class MainWindow(QMainWindow):
             return
 
         imported_rows: list[tuple[list[str], bool, bool]] = []
+        used_ids: set[int] = set()
         for index, raw_item in enumerate(raw_items, start=1):
             if not isinstance(raw_item, dict):
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Veri dict formatinda olmali.")
                 return
+            raw_id = raw_item.get("id")
+            raw_id_text = str(raw_id).strip() if raw_id is not None else ""
+            overlay_id = self._parse_positive_overlay_id(raw_id_text) if raw_id_text else None
+            if raw_id_text and overlay_id is None:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: ID pozitif tam sayi olmali.")
+                return
+            if overlay_id is None:
+                overlay_id = self._next_text_overlay_id(used_ids, include_table=False)
+            if overlay_id in used_ids:
+                QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: ID tekrar ediyor ({overlay_id}).")
+                return
+            used_ids.add(int(overlay_id))
             text_value = str(raw_item.get("text", "")).strip()
             if not text_value:
                 QMessageBox.warning(self, "Yazi Katmanlari", f"Satir {index}: Metin bos olamaz.")
@@ -2510,6 +2553,7 @@ class MainWindow(QMainWindow):
             imported_rows.append(
                 (
                     [
+                        str(int(overlay_id)),
                         text_value,
                         self._format_overlay_number(start_seconds, 3),
                         self._format_overlay_number(end_seconds, 3),
@@ -2528,12 +2572,13 @@ class MainWindow(QMainWindow):
             table.setRowCount(0)
             for row_values, bold_value, italic_value in imported_rows:
                 self._append_text_overlay_row(
-                    text_value=row_values[0],
-                    start_value=row_values[1],
-                    end_value=row_values[2],
-                    position_value=row_values[3],
-                    size_value=row_values[4],
-                    color_value=row_values[5],
+                    id_value=row_values[0],
+                    text_value=row_values[1],
+                    start_value=row_values[2],
+                    end_value=row_values[3],
+                    position_value=row_values[4],
+                    size_value=row_values[5],
+                    color_value=row_values[6],
                     bold=bold_value,
                     italic=italic_value,
                 )
@@ -3845,7 +3890,9 @@ class MainWindow(QMainWindow):
             return overlays, None
 
         table = self.edit_text_overlay_table
+        seen_ids: set[int] = set()
         for row in range(table.rowCount()):
+            overlay_id_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_ID)
             text_value = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_TEXT)
             start_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_START)
             end_raw = self._edit_table_cell_text(table, row, EDIT_TEXT_COL_END)
@@ -3858,6 +3905,12 @@ class MainWindow(QMainWindow):
             row_values = [text_value, start_raw, end_raw, position_raw, font_size_raw, color_raw]
             if not any(row_values):
                 continue
+            overlay_id = self._parse_positive_overlay_id(overlay_id_raw)
+            if overlay_id is None:
+                return [], f"Yazi katmani satir {row + 1}: ID pozitif tam sayi olmali."
+            if overlay_id in seen_ids:
+                return [], f"Yazi katmani satir {row + 1}: ID tekrar ediyor ({overlay_id})."
+            seen_ids.add(int(overlay_id))
             if not text_value:
                 return [], f"Yazi katmani satir {row + 1}: Metin bos olamaz."
             if not start_raw or not end_raw:
@@ -3891,6 +3944,7 @@ class MainWindow(QMainWindow):
 
             overlays.append(
                 {
+                    "id": int(overlay_id),
                     "text": text_value,
                     "start": round(start_seconds, 6),
                     "end": round(end_seconds, 6),
