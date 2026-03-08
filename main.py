@@ -67,6 +67,7 @@ SETTINGS_APPLICATION = "VideoEditorROI"
 SETTINGS_LAST_TEMPLATE_PATH = "last_template_path"
 SETTINGS_LAST_VIDEO_DIR = "last_video_dir"
 SETTINGS_FFMPEG_PATH = "ffmpeg_path"
+AUTO_EVENT_TIMELINE_FILENAME = "olaylar_timeline.json"
 EVENT_COL_START = 4
 EVENT_COL_END = 5
 EVENT_COL_CONFIDENCE = 6
@@ -1347,6 +1348,7 @@ class MainWindow(QMainWindow):
         self._edit_preview_first_frame_source: str = ""
         self.detection_mode: Optional[str] = None
         self.timeline_dirty = False
+        self._suspend_event_timeline_autoload = False
         self.startup_tab: Optional[QWidget] = None
         self.video_select_tab: Optional[QWidget] = None
         self.edit_tab: Optional[QWidget] = None
@@ -1462,6 +1464,8 @@ class MainWindow(QMainWindow):
         self._current_screen = screen
         self.main_stack.setCurrentWidget(target)
         self._update_navigation_bar()
+        if screen == "event":
+            self._try_auto_import_default_timeline()
         return True
 
     def _update_navigation_bar(self) -> None:
@@ -5107,7 +5111,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Olay Tespit", f"Eksik hedef ROI: {joined}")
             return
 
-        self.switch_to_event_tab()
+        self._suspend_event_timeline_autoload = True
+        try:
+            self.switch_to_event_tab()
+        finally:
+            self._suspend_event_timeline_autoload = False
         self.last_detected_events = []
         self.timeline_dirty = False
         self.last_detection_sample_hz = int(self.sample_hz_spin.value())
@@ -5190,7 +5198,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "ROI Renk Analizi", f"Secili ROI bulunamadi: {roi_name}")
             return
 
-        self.switch_to_event_tab()
+        self._suspend_event_timeline_autoload = True
+        try:
+            self.switch_to_event_tab()
+        finally:
+            self._suspend_event_timeline_autoload = False
         self._invalidate_roi_color_results(refresh_combo=False)
         self._append_event_log(f"ROI renk analizi basladi: {roi_name}")
         self._color_analysis_cancel_requested = False
@@ -5465,6 +5477,104 @@ class MainWindow(QMainWindow):
 
         return normalized_events, None
 
+    def _timeline_payload_matches_current_mode(self, payload: object) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        raw_events = payload.get("events")
+        if not isinstance(raw_events, list):
+            return False
+
+        event_definitions = self._event_definitions_for_current_mode()
+        if len(raw_events) != len(event_definitions):
+            return False
+
+        expected_names = [str(event_info["name"]).strip() for event_info in event_definitions]
+        actual_names: list[str] = []
+        for raw_event in raw_events:
+            if not isinstance(raw_event, dict):
+                return False
+            actual_names.append(str(raw_event.get("name", "")).strip())
+        return actual_names == expected_names
+
+    def _load_timeline_from_path(
+        self,
+        load_path: str,
+        *,
+        quiet: bool = False,
+        success_log_message: Optional[str] = None,
+        success_status_message: Optional[str] = None,
+        require_mode_match: bool = False,
+    ) -> bool:
+        normalized_path = str(load_path).strip()
+        if not normalized_path:
+            return False
+
+        try:
+            with open(normalized_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, json.JSONDecodeError) as exc:
+            if quiet:
+                self.statusBar().showMessage(f"timeline otomatik yuklenemedi: {os.path.basename(normalized_path)}", 4000)
+                self._append_event_log(f"timeline otomatik yuklenemedi: {normalized_path} ({exc})")
+            else:
+                QMessageBox.warning(self, "timeline.json", f"Dosya okunamadi:\n{exc}")
+            return False
+
+        if require_mode_match and not self._timeline_payload_matches_current_mode(payload):
+            return False
+
+        parsed_events, parse_error = self._build_events_from_timeline_payload(payload)
+        if parse_error is not None or parsed_events is None:
+            if quiet:
+                self.statusBar().showMessage(f"timeline otomatik yuklenemedi: {os.path.basename(normalized_path)}", 4000)
+                self._append_event_log(f"timeline otomatik yuklenemedi: {normalized_path} ({parse_error or 'gecersiz veri'})")
+            else:
+                QMessageBox.warning(self, "timeline.json", parse_error or "timeline verisi gecersiz.")
+            return False
+
+        if isinstance(payload, dict):
+            raw_sample_hz = payload.get("sample_hz")
+            try:
+                sample_hz = int(raw_sample_hz)
+            except (TypeError, ValueError):
+                sample_hz = None
+            if sample_hz is not None:
+                sample_hz = max(self.sample_hz_spin.minimum(), min(self.sample_hz_spin.maximum(), sample_hz))
+                self.last_detection_sample_hz = int(sample_hz)
+                self.sample_hz_spin.setValue(int(sample_hz))
+
+        self.last_detected_events = parsed_events
+        self.edit_segments = []
+        self.timeline_dirty = False
+        self._populate_event_table_from_results()
+        self._update_edit_segments_label()
+        self._append_event_log(success_log_message or f"timeline yuklendi: {normalized_path}")
+        self.statusBar().showMessage(
+            success_status_message or f"timeline yuklendi: {os.path.basename(normalized_path)}",
+            4000,
+        )
+        return True
+
+    def _try_auto_import_default_timeline(self) -> None:
+        if self._suspend_event_timeline_autoload:
+            return
+        if self._is_event_detection_running() or self._is_color_analysis_running() or self._is_video_edit_running():
+            return
+        if self.timeline_dirty and self.last_detected_events:
+            return
+
+        default_timeline_path = os.path.join(self._default_project_directory(), AUTO_EVENT_TIMELINE_FILENAME)
+        if not os.path.isfile(default_timeline_path):
+            return
+
+        self._load_timeline_from_path(
+            default_timeline_path,
+            quiet=True,
+            success_log_message=f"timeline otomatik yuklendi: {default_timeline_path}",
+            success_status_message=f"{AUTO_EVENT_TIMELINE_FILENAME} otomatik yuklendi",
+            require_mode_match=True,
+        )
+
     def load_timeline_json(self) -> None:
         if self._is_event_detection_running() or self._is_color_analysis_running() or self._is_video_edit_running():
             QMessageBox.information(self, "timeline.json", "Analiz calisirken timeline yuklenemez.")
@@ -5486,36 +5596,7 @@ class MainWindow(QMainWindow):
         if not load_path:
             return
 
-        try:
-            with open(load_path, "r", encoding="utf-8") as file:
-                payload = json.load(file)
-        except (OSError, json.JSONDecodeError) as exc:
-            QMessageBox.warning(self, "timeline.json", f"Dosya okunamadi:\n{exc}")
-            return
-
-        parsed_events, parse_error = self._build_events_from_timeline_payload(payload)
-        if parse_error is not None or parsed_events is None:
-            QMessageBox.warning(self, "timeline.json", parse_error or "timeline verisi gecersiz.")
-            return
-
-        if isinstance(payload, dict):
-            raw_sample_hz = payload.get("sample_hz")
-            try:
-                sample_hz = int(raw_sample_hz)
-            except (TypeError, ValueError):
-                sample_hz = None
-            if sample_hz is not None:
-                sample_hz = max(self.sample_hz_spin.minimum(), min(self.sample_hz_spin.maximum(), sample_hz))
-                self.last_detection_sample_hz = int(sample_hz)
-                self.sample_hz_spin.setValue(int(sample_hz))
-
-        self.last_detected_events = parsed_events
-        self.edit_segments = []
-        self.timeline_dirty = False
-        self._populate_event_table_from_results()
-        self._update_edit_segments_label()
-        self._append_event_log(f"timeline yuklendi: {load_path}")
-        self.statusBar().showMessage(f"timeline yuklendi: {os.path.basename(load_path)}", 4000)
+        self._load_timeline_from_path(load_path)
 
     def save_timeline_json(self) -> None:
         if not self.last_detected_events:
