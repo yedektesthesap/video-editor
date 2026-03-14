@@ -91,6 +91,7 @@ EDIT_EXTERNAL_AUDIO_COL_FILE = 0
 EDIT_EXTERNAL_AUDIO_COL_START = 1
 EDIT_EXTERNAL_AUDIO_COL_END = 2
 EDIT_EXTERNAL_AUDIO_COL_VOLUME = 3
+EDIT_EXTERNAL_AUDIO_START_EVENT_ROLE = Qt.ItemDataRole.UserRole
 DETECTION_MODE_AUTO = "auto"
 DETECTION_MODE_MANUAL = "manual"
 EVENT_TABLE_VISIBLE_ROWS = 10
@@ -2115,8 +2116,14 @@ class MainWindow(QMainWindow):
         self.edit_external_audio_add_button.clicked.connect(self.on_add_external_audio_row_clicked)
         self.edit_external_audio_remove_button = QPushButton("Satir Sil")
         self.edit_external_audio_remove_button.clicked.connect(self.on_remove_external_audio_row_clicked)
+        self.edit_external_audio_save_button = QPushButton("Tablo Kaydet")
+        self.edit_external_audio_save_button.clicked.connect(self.on_save_external_audio_rows_clicked)
+        self.edit_external_audio_import_button = QPushButton("Tablo Import Et")
+        self.edit_external_audio_import_button.clicked.connect(self.on_import_external_audio_rows_clicked)
         external_audio_button_layout.addWidget(self.edit_external_audio_add_button)
         external_audio_button_layout.addWidget(self.edit_external_audio_remove_button)
+        external_audio_button_layout.addWidget(self.edit_external_audio_save_button)
+        external_audio_button_layout.addWidget(self.edit_external_audio_import_button)
         external_audio_button_layout.addStretch(1)
         external_audio_layout.addLayout(external_audio_button_layout)
         top_layout.addWidget(self.edit_external_audio_group)
@@ -2260,7 +2267,14 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         table.setMinimumHeight(150)
 
-    def _on_edit_overlay_table_changed(self, *_args: object) -> None:
+    def _on_edit_overlay_table_changed(self, item: Optional[QTableWidgetItem] = None) -> None:
+        if (
+            item is not None
+            and hasattr(self, "edit_external_audio_table")
+            and item.tableWidget() is self.edit_external_audio_table
+            and item.column() == EDIT_EXTERNAL_AUDIO_COL_START
+        ):
+            self._clear_external_audio_start_item_metadata(item)
         self._update_edit_controls()
         self._update_edit_overlay_preview(force_frame_reload=False)
 
@@ -2396,23 +2410,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Yazi Katmanlari", "Video suresi belirlenemedi.")
             return
 
-        event_start_times: dict[str, float] = {}
-        for event_payload in self.last_detected_events:
-            if not isinstance(event_payload, dict):
-                continue
-            event_name = str(event_payload.get("name", "")).strip()
-            if not event_name or event_name in event_start_times:
-                continue
-            raw_start = event_payload.get("start")
-            if raw_start is None:
-                continue
-            try:
-                start_seconds = float(raw_start)
-            except (TypeError, ValueError):
-                continue
-            if 0.0 <= start_seconds < float(video_duration):
-                event_start_times[event_name] = start_seconds
-
+        event_start_times = self._available_event_start_times(video_duration)
         if not event_start_times:
             QMessageBox.information(self, "Yazi Katmanlari", "Kullanilabilir event start zamani bulunamadi.")
             return
@@ -2465,6 +2463,28 @@ class MainWindow(QMainWindow):
     def _format_overlay_number(value: float, decimals: int = 6) -> str:
         text = f"{float(value):.{max(0, int(decimals))}f}".rstrip("0").rstrip(".")
         return text or "0"
+
+    def _available_event_start_times(self, max_seconds: Optional[float] = None) -> dict[str, float]:
+        event_start_times: dict[str, float] = {}
+        for event_payload in self.last_detected_events:
+            if not isinstance(event_payload, dict):
+                continue
+            event_name = str(event_payload.get("name", "")).strip()
+            if not event_name or event_name in event_start_times:
+                continue
+            raw_start = event_payload.get("start")
+            if raw_start is None:
+                continue
+            try:
+                start_seconds = float(raw_start)
+            except (TypeError, ValueError):
+                continue
+            if start_seconds < 0.0:
+                continue
+            if max_seconds is not None and start_seconds >= float(max_seconds):
+                continue
+            event_start_times[event_name] = start_seconds
+        return event_start_times
 
     def on_save_text_overlay_rows_clicked(self) -> None:
         if not hasattr(self, "edit_text_overlay_table"):
@@ -3058,16 +3078,142 @@ class MainWindow(QMainWindow):
     def on_add_external_audio_row_clicked(self) -> None:
         self.edit_external_audio_table.blockSignals(True)
         try:
-            self._set_table_row_values(
-                self.edit_external_audio_table,
-                ["", "0.0", "", "1.0"],
-            )
+            self._append_external_audio_row("", "0.0", "", "1.0")
         finally:
             self.edit_external_audio_table.blockSignals(False)
         self._update_edit_controls()
 
     def on_remove_external_audio_row_clicked(self) -> None:
         self._remove_selected_table_row(self.edit_external_audio_table)
+        self._update_edit_controls()
+
+    def _append_external_audio_row(
+        self,
+        path_value: str,
+        start_value: str,
+        end_value: str,
+        volume_value: str,
+        start_event_name: Optional[str] = None,
+    ) -> None:
+        self._set_table_row_values(
+            self.edit_external_audio_table,
+            [path_value, start_value, end_value, volume_value],
+        )
+        row = self.edit_external_audio_table.rowCount() - 1
+        if row < 0 or not start_event_name:
+            return
+        start_item = self.edit_external_audio_table.item(row, EDIT_EXTERNAL_AUDIO_COL_START)
+        if start_item is None:
+            return
+        try:
+            start_seconds = float(start_value)
+        except (TypeError, ValueError):
+            return
+        self._set_external_audio_start_item_metadata(start_item, start_event_name, start_seconds)
+
+    @staticmethod
+    def _clear_external_audio_start_item_metadata(item: QTableWidgetItem) -> None:
+        item.setData(EDIT_EXTERNAL_AUDIO_START_EVENT_ROLE, None)
+        item.setToolTip("")
+
+    def _set_external_audio_start_item_metadata(
+        self,
+        item: QTableWidgetItem,
+        event_name: str,
+        start_seconds: float,
+    ) -> None:
+        cleaned_name = str(event_name).strip()
+        if not cleaned_name:
+            self._clear_external_audio_start_item_metadata(item)
+            return
+        item.setData(EDIT_EXTERNAL_AUDIO_START_EVENT_ROLE, cleaned_name)
+        item.setToolTip(f"Event: {cleaned_name} | Baslangic: {format_time_dk_sn_ms(start_seconds)}")
+
+    def _external_audio_start_event_names(self) -> list[Optional[str]]:
+        event_names: list[Optional[str]] = []
+        if not hasattr(self, "edit_external_audio_table"):
+            return event_names
+
+        table = self.edit_external_audio_table
+        for row in range(table.rowCount()):
+            row_values = [
+                self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_FILE),
+                self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_START),
+                self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_END),
+                self._edit_table_cell_text(table, row, EDIT_EXTERNAL_AUDIO_COL_VOLUME),
+            ]
+            if not any(row_values):
+                continue
+            start_item = table.item(row, EDIT_EXTERNAL_AUDIO_COL_START)
+            raw_event_name = start_item.data(EDIT_EXTERNAL_AUDIO_START_EVENT_ROLE) if start_item is not None else None
+            event_name = str(raw_event_name).strip() if raw_event_name is not None else ""
+            event_names.append(event_name or None)
+        return event_names
+
+    def _begin_external_audio_start_edit(self, row: int) -> None:
+        table = self.edit_external_audio_table
+        if table.state() == QAbstractItemView.State.EditingState:
+            return
+        item = table.item(row, EDIT_EXTERNAL_AUDIO_COL_START)
+        if item is None:
+            item = QTableWidgetItem("0.0")
+            table.setItem(row, EDIT_EXTERNAL_AUDIO_COL_START, item)
+        table.editItem(item)
+
+    def _pick_external_audio_start_from_events(self, row: int) -> None:
+        if not hasattr(self, "edit_external_audio_table"):
+            return
+
+        event_start_times = self._available_event_start_times()
+        if not event_start_times:
+            self._begin_external_audio_start_edit(row)
+            return
+
+        table = self.edit_external_audio_table
+        start_item = table.item(row, EDIT_EXTERNAL_AUDIO_COL_START)
+        if start_item is None:
+            start_item = QTableWidgetItem("0.0")
+            table.setItem(row, EDIT_EXTERNAL_AUDIO_COL_START, start_item)
+
+        current_event_name_raw = start_item.data(EDIT_EXTERNAL_AUDIO_START_EVENT_ROLE)
+        current_event_name = str(current_event_name_raw).strip() if current_event_name_raw is not None else ""
+
+        option_labels = ["Elle Gir"]
+        option_map: dict[str, tuple[str, float]] = {}
+        current_index = 0
+        for index, (event_name, start_seconds) in enumerate(event_start_times.items(), start=1):
+            label = f"{event_name} ({format_time_dk_sn_ms(start_seconds)})"
+            option_labels.append(label)
+            option_map[label] = (event_name, start_seconds)
+            if event_name == current_event_name:
+                current_index = index
+
+        selected_label, accepted = QInputDialog.getItem(
+            self,
+            "Harici Ses Baslangici",
+            "Event secin:",
+            option_labels,
+            current_index,
+            False,
+        )
+        if not accepted:
+            return
+        if selected_label == "Elle Gir":
+            self._clear_external_audio_start_item_metadata(start_item)
+            self._begin_external_audio_start_edit(row)
+            return
+
+        selected_event = option_map.get(selected_label)
+        if selected_event is None:
+            return
+
+        event_name, start_seconds = selected_event
+        table.blockSignals(True)
+        try:
+            start_item.setText(self._format_overlay_number(start_seconds, 3))
+            self._set_external_audio_start_item_metadata(start_item, event_name, start_seconds)
+        finally:
+            table.blockSignals(False)
         self._update_edit_controls()
 
     def on_edit_external_audio_cell_clicked(self, row: int, col: int) -> None:
@@ -3079,15 +3225,16 @@ class MainWindow(QMainWindow):
             return
 
         if col != EDIT_EXTERNAL_AUDIO_COL_FILE:
-            if col in (EDIT_EXTERNAL_AUDIO_COL_START, EDIT_EXTERNAL_AUDIO_COL_END, EDIT_EXTERNAL_AUDIO_COL_VOLUME):
+            if col == EDIT_EXTERNAL_AUDIO_COL_START:
+                self._pick_external_audio_start_from_events(row)
+                return
+            if col in (EDIT_EXTERNAL_AUDIO_COL_END, EDIT_EXTERNAL_AUDIO_COL_VOLUME):
                 if table.state() == QAbstractItemView.State.EditingState:
                     return
                 item = table.item(row, col)
                 if item is None:
                     default_value = ""
-                    if col == EDIT_EXTERNAL_AUDIO_COL_START:
-                        default_value = "0.0"
-                    elif col == EDIT_EXTERNAL_AUDIO_COL_VOLUME:
+                    if col == EDIT_EXTERNAL_AUDIO_COL_VOLUME:
                         default_value = "1.0"
                     item = QTableWidgetItem(default_value)
                     table.setItem(row, col, item)
@@ -3130,6 +3277,174 @@ class MainWindow(QMainWindow):
         finally:
             table.blockSignals(False)
         self._update_edit_controls()
+
+    def on_save_external_audio_rows_clicked(self) -> None:
+        if not hasattr(self, "edit_external_audio_table"):
+            return
+        tracks, track_error = self._collect_external_audio_tracks()
+        if track_error is not None:
+            QMessageBox.warning(self, "Harici Ses Katmanlari", track_error)
+            return
+        if not tracks:
+            QMessageBox.information(self, "Harici Ses Katmanlari", "Kaydedilecek gecerli harici ses satiri yok.")
+            return
+
+        source_video = self.video_meta.source_video if self.video_meta is not None else ""
+        initial_dir = self._default_project_directory()
+        video_name = os.path.splitext(os.path.basename(source_video))[0].strip() if source_video else "video"
+        if not video_name:
+            video_name = "video"
+        initial_path = os.path.join(initial_dir, f"{video_name}_external_audio_tracks.json")
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Harici Ses Tablosunu Kaydet",
+            initial_path,
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".json"):
+            save_path += ".json"
+
+        serializable_items: list[dict] = []
+        for track, start_event_name in zip(tracks, self._external_audio_start_event_names()):
+            payload_item = dict(track)
+            if start_event_name:
+                payload_item["start_event_name"] = start_event_name
+            serializable_items.append(payload_item)
+
+        payload = {
+            "type": "external_audio_tracks",
+            "version": "1.0",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "source_video": source_video,
+            "items": serializable_items,
+        }
+        try:
+            with open(save_path, "w", encoding="utf-8") as file:
+                json.dump(payload, file, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            QMessageBox.critical(self, "Harici Ses Katmanlari", f"Kayit basarisiz:\n{exc}")
+            return
+
+        self.statusBar().showMessage(f"Harici ses tablosu kaydedildi: {save_path}", 3500)
+        self._append_edit_log(f"Harici ses tablosu kaydedildi: {save_path}")
+
+    def on_import_external_audio_rows_clicked(self) -> None:
+        if not hasattr(self, "edit_external_audio_table"):
+            return
+        initial_dir = self._default_project_directory()
+
+        load_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Harici Ses Tablosunu Import Et",
+            initial_dir,
+            "JSON Files (*.json);;All Files (*.*)",
+        )
+        if not load_path:
+            return
+
+        try:
+            with open(load_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.warning(self, "Harici Ses Katmanlari", f"Dosya okunamadi:\n{exc}")
+            return
+
+        raw_items: object = payload
+        if isinstance(payload, dict):
+            if isinstance(payload.get("items"), list):
+                raw_items = payload.get("items")
+            elif isinstance(payload.get("external_audio_tracks"), list):
+                raw_items = payload.get("external_audio_tracks")
+            elif isinstance(payload.get("tracks"), list):
+                raw_items = payload.get("tracks")
+
+        if not isinstance(raw_items, list):
+            QMessageBox.warning(self, "Harici Ses Katmanlari", "Dosya formati gecersiz: ses listesi bulunamadi.")
+            return
+
+        imported_rows: list[tuple[str, str, str, str, Optional[str]]] = []
+        for index, raw_item in enumerate(raw_items, start=1):
+            if not isinstance(raw_item, dict):
+                QMessageBox.warning(self, "Harici Ses Katmanlari", f"Satir {index}: Veri dict formatinda olmali.")
+                return
+
+            path_value = str(raw_item.get("path", raw_item.get("file", ""))).strip()
+            if not path_value:
+                QMessageBox.warning(self, "Harici Ses Katmanlari", f"Satir {index}: Dosya yolu bos olamaz.")
+                return
+
+            try:
+                start_seconds = float(raw_item.get("start", ""))
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "Harici Ses Katmanlari", f"Satir {index}: Baslangic gecersiz.")
+                return
+            if start_seconds < 0.0:
+                QMessageBox.warning(self, "Harici Ses Katmanlari", f"Satir {index}: Baslangic 0'dan kucuk olamaz.")
+                return
+
+            end_seconds: Optional[float] = None
+            raw_end = raw_item.get("end")
+            if raw_end not in (None, ""):
+                try:
+                    end_seconds = float(raw_end)
+                except (TypeError, ValueError):
+                    QMessageBox.warning(self, "Harici Ses Katmanlari", f"Satir {index}: Bitis gecersiz.")
+                    return
+                if end_seconds <= start_seconds:
+                    QMessageBox.warning(
+                        self,
+                        "Harici Ses Katmanlari",
+                        f"Satir {index}: Bitis baslangictan buyuk olmali.",
+                    )
+                    return
+
+            try:
+                volume_value = float(raw_item.get("volume", 1.0))
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "Harici Ses Katmanlari", f"Satir {index}: Ses seviyesi gecersiz.")
+                return
+            if volume_value < 0.0 or volume_value > 4.0:
+                QMessageBox.warning(
+                    self,
+                    "Harici Ses Katmanlari",
+                    f"Satir {index}: Ses seviyesi 0.0-4.0 araliginda olmali.",
+                )
+                return
+
+            start_event_name_raw = raw_item.get("start_event_name")
+            start_event_name = str(start_event_name_raw).strip() if start_event_name_raw is not None else ""
+            imported_rows.append(
+                (
+                    path_value,
+                    self._format_overlay_number(start_seconds, 3),
+                    self._format_overlay_number(end_seconds, 3) if end_seconds is not None else "",
+                    self._format_overlay_number(volume_value, 3),
+                    start_event_name or None,
+                )
+            )
+
+        table = self.edit_external_audio_table
+        table.blockSignals(True)
+        try:
+            table.setRowCount(0)
+            for path_value, start_value, end_value, volume_value, start_event_name in imported_rows:
+                self._append_external_audio_row(
+                    path_value,
+                    start_value,
+                    end_value,
+                    volume_value,
+                    start_event_name=start_event_name,
+                )
+        finally:
+            table.blockSignals(False)
+
+        if imported_rows and hasattr(self, "edit_external_audio_enabled_checkbox"):
+            self.edit_external_audio_enabled_checkbox.setChecked(True)
+        self._update_edit_controls()
+        self.statusBar().showMessage(f"Harici ses tablosu import edildi: {os.path.basename(load_path)}", 3500)
+        self._append_edit_log(f"Harici ses tablosu import edildi: {load_path}")
 
     def _clear_edit_overlay_preview_cache(self) -> None:
         self._edit_preview_first_frame_bgr = None
@@ -4445,6 +4760,10 @@ class MainWindow(QMainWindow):
             self.edit_external_audio_add_button.setEnabled((not is_running) and external_audio_enabled)
         if hasattr(self, "edit_external_audio_remove_button"):
             self.edit_external_audio_remove_button.setEnabled((not is_running) and external_audio_enabled)
+        if hasattr(self, "edit_external_audio_save_button"):
+            self.edit_external_audio_save_button.setEnabled(not is_running)
+        if hasattr(self, "edit_external_audio_import_button"):
+            self.edit_external_audio_import_button.setEnabled(not is_running)
         if hasattr(self, "edit_speed_enabled_checkbox"):
             self.edit_speed_enabled_checkbox.setEnabled(not is_running)
         if hasattr(self, "edit_speed_combo"):
