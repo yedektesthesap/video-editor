@@ -4684,7 +4684,11 @@ class MainWindow(QMainWindow):
         is_running = self._is_video_edit_running()
         has_video = self.video_meta is not None and os.path.isfile(self.video_meta.source_video)
         output_directory = self.edit_output_path_edit.text().strip()
-        output_directory_ready = bool(output_directory) and os.path.isdir(output_directory)
+        default_output_directory = ""
+        if has_video and self.video_meta is not None:
+            default_output_directory = self._default_edit_output_directory(self.video_meta.source_video)
+        effective_output_directory = output_directory or default_output_directory
+        output_directory_ready = bool(effective_output_directory) and os.path.isdir(effective_output_directory)
         cut_enabled = self.edit_cut_enabled_checkbox.isChecked()
         resize_enabled = self.edit_resize_enabled_checkbox.isChecked() if hasattr(self, "edit_resize_enabled_checkbox") else False
         remove_audio_enabled = self._is_edit_remove_audio_enabled()
@@ -4692,32 +4696,6 @@ class MainWindow(QMainWindow):
         text_overlay_enabled = self._is_edit_text_overlay_enabled()
         image_overlay_enabled = self._is_edit_image_overlay_enabled()
         external_audio_enabled = self._is_edit_external_audio_enabled()
-
-        has_segments = bool(self.edit_segments)
-        cut_ready = True
-        merged_segments: Optional[list[tuple[float, float]]] = None
-        if cut_enabled:
-            merged_segments, merge_error = self._build_merged_cut_segments()
-            cut_ready = merge_error is None and merged_segments is not None and bool(merged_segments)
-            has_segments = cut_ready
-
-        target_resolution, target_fps = self._effective_resize_targets()
-        resize_ready = (not resize_enabled) or (target_resolution is not None or target_fps is not None)
-        speed_factor = self._selected_speed_factor()
-        speed_ready = (not speed_enabled) or (speed_factor is not None)
-        effective_speed_factor = self._effective_speed_factor()
-        text_overlays, text_overlay_error = self._collect_text_overlays()
-        image_overlays, image_overlay_error = self._collect_image_overlays()
-        external_audio_tracks, external_audio_error = self._collect_external_audio_tracks()
-        text_overlay_ready = (not text_overlay_enabled) or (text_overlay_error is None and bool(text_overlays))
-        image_overlay_ready = (not image_overlay_enabled) or (image_overlay_error is None and bool(image_overlays))
-        external_audio_ready = (not external_audio_enabled) or (
-            external_audio_error is None and bool(external_audio_tracks)
-        )
-        visual_overlay_effective = (
-            (text_overlay_enabled and bool(text_overlays)) or (image_overlay_enabled and bool(image_overlays))
-        )
-        external_audio_effective = external_audio_enabled and bool(external_audio_tracks)
 
         has_selected_operation = (
             cut_enabled
@@ -4728,27 +4706,12 @@ class MainWindow(QMainWindow):
             or image_overlay_enabled
             or external_audio_enabled
         )
-        has_effective_operation = (
-            (cut_enabled and has_segments)
-            or (resize_enabled and (target_resolution is not None or target_fps is not None))
-            or remove_audio_enabled
-            or (effective_speed_factor is not None)
-            or visual_overlay_effective
-            or external_audio_effective
-        )
 
         analysis_running = self._is_event_detection_running() or self._is_color_analysis_running()
         can_run = (
             has_video
             and output_directory_ready
             and has_selected_operation
-            and has_effective_operation
-            and cut_ready
-            and resize_ready
-            and speed_ready
-            and text_overlay_ready
-            and image_overlay_ready
-            and external_audio_ready
             and (not is_running)
             and (not analysis_running)
         )
