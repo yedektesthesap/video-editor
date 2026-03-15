@@ -2183,30 +2183,30 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.edit_speed_group)
 
         checkbox_icon_url = _stylesheet_file_url(CHECKBOX_TICK_ICON_PATH)
-        edit_checkbox_style = f"""
-        QCheckBox {
-            spacing: 8px;
-            min-height: 26px;
-            color: #f3f6fb;
-            font-size: 14px;
-            font-weight: 600;
-        }
-        QCheckBox::indicator {
-            width: 20px;
-            height: 20px;
-            background-color: #5f6672;
-            border: 1px solid #7a8392;
-            border-radius: 4px;
-        }
-        QCheckBox::indicator:checked {
-            background-color: #5f6672;
-            border: 1px solid #7a8392;
-            image: url("{checkbox_icon_url}");
-        }
-        QCheckBox:disabled {
-            color: #8e97a8;
-        }
-        """
+        edit_checkbox_style = (
+            "QCheckBox {\n"
+            "    spacing: 8px;\n"
+            "    min-height: 26px;\n"
+            "    color: #f3f6fb;\n"
+            "    font-size: 14px;\n"
+            "    font-weight: 600;\n"
+            "}\n"
+            "QCheckBox::indicator {\n"
+            "    width: 20px;\n"
+            "    height: 20px;\n"
+            "    background-color: #5f6672;\n"
+            "    border: 1px solid #7a8392;\n"
+            "    border-radius: 4px;\n"
+            "}\n"
+            "QCheckBox::indicator:checked {\n"
+            "    background-color: #5f6672;\n"
+            "    border: 1px solid #7a8392;\n"
+            f'    image: url("{checkbox_icon_url}");\n'
+            "}\n"
+            "QCheckBox:disabled {\n"
+            "    color: #8e97a8;\n"
+            "}\n"
+        )
         for checkbox in (
             self.edit_cut_enabled_checkbox,
             self.edit_resize_enabled_checkbox,
