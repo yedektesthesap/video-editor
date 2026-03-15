@@ -1,7 +1,8 @@
 Set fso = CreateObject("Scripting.FileSystemObject")
+Set shell = CreateObject("WScript.Shell")
 base = fso.GetParentFolderName(WScript.ScriptFullName)
 pyw = base & "\\.venv\\Scripts\\pythonw.exe"
-app = base & "\\src\\main.py"
+app = base & "\\launcher.py"
 
 If Not fso.FileExists(pyw) Then
   MsgBox ".venv bulunamadi. Once bir kez kurulum yapin:", 48, "Video Editor"
@@ -9,5 +10,11 @@ If Not fso.FileExists(pyw) Then
   WScript.Quit 1
 End If
 
+If Not fso.FileExists(app) Then
+  MsgBox "launcher.py bulunamadi: " & app, 16, "Video Editor"
+  WScript.Quit 1
+End If
+
 cmd = Chr(34) & pyw & Chr(34) & " " & Chr(34) & app & Chr(34)
-CreateObject("WScript.Shell").Run cmd, 0, False
+shell.CurrentDirectory = base
+shell.Run cmd, 0, False
