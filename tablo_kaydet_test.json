@@ -1,0 +1,15 @@
+{
+  "type": "external_audio_tracks",
+  "version": "1.0",
+  "created_at": "2026-03-14T10:25:00.159162+00:00",
+  "source_video": "C:/Users/Broke/Downloads/VID_20260201_222033 (1).mp4",
+  "items": [
+    {
+      "path": "C:/Users/Broke/Downloads/karıstırma sesı.mp3",
+      "start": 7.24,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol1_al1"
+    }
+  ]
+}
