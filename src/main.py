@@ -56,6 +56,37 @@ from PyQt6.QtWidgets import (
 from event_detector import EVENT_DEFINITIONS, REQUIRED_TARGET_ROIS
 from event_worker import EventDetectionWorker, RoiColorAnalysisWorker, VideoEditWorker
 
+
+def _runtime_project_root() -> str:
+    if getattr(sys, "frozen", False):
+        base_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        if os.path.basename(base_dir).casefold() == "src":
+            base_dir = os.path.dirname(base_dir)
+
+    if base_dir and os.path.isdir(base_dir):
+        return base_dir
+    return os.getcwd()
+
+
+def _existing_directory_or_fallback(path: str, fallback: str) -> str:
+    normalized = os.path.abspath(path)
+    if os.path.isdir(normalized):
+        return normalized
+    return fallback
+
+
+def _stylesheet_file_url(path: str) -> str:
+    return os.path.abspath(path).replace("\\", "/")
+
+
+PROJECT_ROOT = _runtime_project_root()
+DATA_JSON_DIR = os.path.join(PROJECT_ROOT, "data", "json")
+ASSETS_AUDIO_DIR = os.path.join(PROJECT_ROOT, "assets", "audio")
+ASSETS_ICON_DIR = os.path.join(PROJECT_ROOT, "assets", "icons")
+CHECKBOX_TICK_ICON_PATH = os.path.join(ASSETS_ICON_DIR, "checkbox_tick_black.svg")
+
 MAX_DISPLAY_WIDTH = 1200
 MAX_DISPLAY_HEIGHT = 1200
 MIN_RELATIVE_SIZE = 0.002
@@ -2151,7 +2182,8 @@ class MainWindow(QMainWindow):
         speed_layout.addLayout(speed_target_layout)
         top_layout.addWidget(self.edit_speed_group)
 
-        edit_checkbox_style = """
+        checkbox_icon_url = _stylesheet_file_url(CHECKBOX_TICK_ICON_PATH)
+        edit_checkbox_style = f"""
         QCheckBox {
             spacing: 8px;
             min-height: 26px;
@@ -2169,7 +2201,7 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator:checked {
             background-color: #5f6672;
             border: 1px solid #7a8392;
-            image: url(checkbox_tick_black.svg);
+            image: url("{checkbox_icon_url}");
         }
         QCheckBox:disabled {
             color: #8e97a8;
@@ -2498,7 +2530,7 @@ class MainWindow(QMainWindow):
             return
 
         source_video = self.video_meta.source_video if self.video_meta is not None else ""
-        initial_dir = self._default_project_directory()
+        initial_dir = self._default_json_directory()
 
         video_name = os.path.splitext(os.path.basename(source_video))[0].strip() if source_video else "video"
         if not video_name:
@@ -2544,7 +2576,7 @@ class MainWindow(QMainWindow):
     def on_import_text_overlay_rows_clicked(self) -> None:
         if not hasattr(self, "edit_text_overlay_table"):
             return
-        initial_dir = self._default_project_directory()
+        initial_dir = self._default_json_directory()
 
         load_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -3051,7 +3083,7 @@ class MainWindow(QMainWindow):
         if not initial_dir:
             initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
         if not initial_dir or not os.path.isdir(initial_dir):
-            initial_dir = os.getcwd()
+            initial_dir = self._default_project_directory()
 
         selected_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -3255,7 +3287,9 @@ class MainWindow(QMainWindow):
         if not initial_dir:
             initial_dir = self.settings.value(SETTINGS_LAST_VIDEO_DIR, "", type=str).strip()
         if not initial_dir or not os.path.isdir(initial_dir):
-            initial_dir = os.getcwd()
+            initial_dir = self._default_audio_directory()
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = self._default_project_directory()
 
         selected_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -3290,7 +3324,7 @@ class MainWindow(QMainWindow):
             return
 
         source_video = self.video_meta.source_video if self.video_meta is not None else ""
-        initial_dir = self._default_project_directory()
+        initial_dir = self._default_json_directory()
         video_name = os.path.splitext(os.path.basename(source_video))[0].strip() if source_video else "video"
         if not video_name:
             video_name = "video"
@@ -3333,7 +3367,7 @@ class MainWindow(QMainWindow):
     def on_import_external_audio_rows_clicked(self) -> None:
         if not hasattr(self, "edit_external_audio_table"):
             return
-        initial_dir = self._default_project_directory()
+        initial_dir = self._default_json_directory()
 
         load_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -4080,17 +4114,19 @@ class MainWindow(QMainWindow):
         source_dir = os.path.dirname(os.path.abspath(source_video))
         if source_dir and os.path.isdir(source_dir):
             return source_dir
-        return os.getcwd()
+        return _existing_directory_or_fallback(PROJECT_ROOT, os.getcwd())
 
     @staticmethod
     def _default_project_directory() -> str:
-        if getattr(sys, "frozen", False):
-            project_dir = os.path.dirname(os.path.abspath(sys.executable))
-        else:
-            project_dir = os.path.dirname(os.path.abspath(__file__))
-        if project_dir and os.path.isdir(project_dir):
-            return project_dir
-        return os.getcwd()
+        return _existing_directory_or_fallback(PROJECT_ROOT, os.getcwd())
+
+    @staticmethod
+    def _default_json_directory() -> str:
+        return _existing_directory_or_fallback(DATA_JSON_DIR, MainWindow._default_project_directory())
+
+    @staticmethod
+    def _default_audio_directory() -> str:
+        return _existing_directory_or_fallback(ASSETS_AUDIO_DIR, MainWindow._default_project_directory())
 
     def _default_edit_output_path(self, source_video: str, output_directory: str) -> str:
         source_dir = str(output_directory).strip()
@@ -4798,7 +4834,7 @@ class MainWindow(QMainWindow):
             if os.path.isdir(candidate_dir):
                 initial_dir = candidate_dir
         if not initial_dir:
-            initial_dir = os.getcwd()
+            initial_dir = self._default_project_directory()
 
         ffmpeg_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -5964,7 +6000,7 @@ class MainWindow(QMainWindow):
         if self.timeline_dirty and self.last_detected_events:
             return
 
-        default_timeline_path = os.path.join(self._default_project_directory(), AUTO_EVENT_TIMELINE_FILENAME)
+        default_timeline_path = os.path.join(self._default_json_directory(), AUTO_EVENT_TIMELINE_FILENAME)
         if not os.path.isfile(default_timeline_path):
             return
 
@@ -5981,12 +6017,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "timeline.json", "Analiz calisirken timeline yuklenemez.")
             return
 
-        if getattr(sys, "frozen", False):
-            initial_dir = os.path.dirname(os.path.abspath(sys.executable))
-        else:
-            initial_dir = os.path.dirname(os.path.abspath(__file__))
-        if not os.path.isdir(initial_dir):
-            initial_dir = os.getcwd()
+        initial_dir = self._default_json_directory()
 
         load_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -6016,7 +6047,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "timeline.json", validation_error)
                 return
 
-        initial_dir = os.path.dirname(self.current_template_path) if self.current_template_path else os.getcwd()
+        initial_dir = os.path.dirname(self.current_template_path) if self.current_template_path else self._default_json_directory()
+        if not os.path.isdir(initial_dir):
+            initial_dir = self._default_json_directory()
         video_name = os.path.splitext(os.path.basename(self.video_meta.source_video))[0].strip()
         if not video_name:
             video_name = "video"
@@ -6200,7 +6233,7 @@ class MainWindow(QMainWindow):
                 if os.path.isdir(current_video_dir):
                     initial_dir = current_video_dir
         if not initial_dir:
-            initial_dir = os.getcwd()
+            initial_dir = self._default_project_directory()
 
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -6357,7 +6390,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save Template", "At least one ROI rectangle is required.")
             return
 
-        initial_path = self.current_template_path or os.path.join(os.getcwd(), "roi_template.json")
+        initial_path = self.current_template_path or os.path.join(self._default_json_directory(), "roi_template.json")
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Template",
@@ -6396,7 +6429,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Template saved: {save_path}", 4000)
 
     def load_template_dialog(self) -> None:
-        initial_path = self.current_template_path or os.getcwd()
+        initial_path = self.current_template_path or self._default_json_directory()
         load_path, _ = QFileDialog.getOpenFileName(
             self,
             "Load Template",

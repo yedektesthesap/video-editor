@@ -9,4 +9,4 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 
-".venv\Scripts\pythonw.exe" main.py
+".venv\Scripts\pythonw.exe" src\main.py

@@ -1,7 +1,7 @@
 Set fso = CreateObject("Scripting.FileSystemObject")
 base = fso.GetParentFolderName(WScript.ScriptFullName)
 pyw = base & "\\.venv\\Scripts\\pythonw.exe"
-app = base & "\\main.py"
+app = base & "\\src\\main.py"
 
 If Not fso.FileExists(pyw) Then
   MsgBox ".venv bulunamadi. Once bir kez kurulum yapin:", 48, "Video Editor"
