@@ -1,0 +1,288 @@
+{
+  "type": "external_audio_tracks",
+  "version": "1.0",
+  "created_at": "2026-03-17T18:36:22.684653+00:00",
+  "source_video": "C:/Users/ysn_l/OneDrive/Desktop/111-test_cut20260315-134645.mp4",
+  "items": [
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 7.24,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol1_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 10.53,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol2_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 13.38,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol2_al2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 16.32,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol3_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 19.16,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol3_al2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 21.76,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol3_al3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 24.55,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 26.95,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_al2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 29.45,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_al3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 31.89,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_al4"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 97.93,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag4_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 115.6,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag3_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 118.3,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag3_al2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 136.13,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag2_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 138.48,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag2_al2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 140.92,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag2_al3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 167.82,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_al1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 170.22,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_al2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 172.31,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_al3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/alma sesı.mp3",
+      "start": 174.61,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_al4"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 8.83,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol1_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 12.03,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol2_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 14.87,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol2_koy2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 17.82,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol3_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 20.51,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol3_koy2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 23.36,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol3_koy3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 26.0,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 28.4,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_koy2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 30.79,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_koy3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 33.49,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sol4_koy4"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 99.73,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag4_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 117.2,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag3_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 119.79,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag3_koy2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 137.53,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag2_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 139.82,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag2_koy2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 142.27,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag2_koy3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 169.27,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_koy1"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 171.36,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_koy2"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 173.66,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_koy3"
+    },
+    {
+      "path": "C:/Users/ysn_l/OneDrive/Desktop/workSpace/video-editor/assets/audio/dokme sesı.mp3",
+      "start": 175.96,
+      "end": null,
+      "volume": 1.0,
+      "start_event_name": "sag1_koy4"
+    }
+  ]
+}
